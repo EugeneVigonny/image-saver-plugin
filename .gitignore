@@ -22,3 +22,8 @@ lerna-debug.log*
 # temp directory
 .temp
 .tmp
+
+# Cursor workspace files (keep shared project rules)
+.cursor/*
+!.cursor/rules/
+!.cursor/rules/**
