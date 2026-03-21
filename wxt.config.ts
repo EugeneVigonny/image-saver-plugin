@@ -2,6 +2,16 @@ import { defineConfig } from 'wxt';
 
 // See https://wxt.dev/api/config.html
 export default defineConfig({
+    dev: {
+        server: {
+            port: 3000,
+            origin: "http://localhost:3000",
+        },
+    },
+    webExt: {
+        /** Вкладка при старте `wxt` — иначе часто открывается пустая (about:blank). */
+        startUrls: ["http://localhost:3000/dev-fixture.html"],
+    },
     vite: () => ({
         // `WXT_*` доступны в `import.meta.env` наряду со стандартным префиксом Vite
         envPrefix: ["VITE_", "WXT_"],
