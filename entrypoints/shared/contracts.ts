@@ -36,6 +36,12 @@ export type QueueState = Readonly<{
     updated_at: number;
 }>;
 
+/** Ответ на `queue_save`: подтверждение id и снимок очереди (единый тип для content + background). */
+export type QueueSaveResult = Readonly<{
+    accepted_job_id: string;
+    queue_state: QueueState;
+}>;
+
 export type SaveOutcomeOk = Readonly<{
     kind: "ok";
     job_id: string;

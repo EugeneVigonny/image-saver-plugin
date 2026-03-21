@@ -6,6 +6,7 @@ import {
     type PopupDirectoryState,
     is_runtime_request_message,
     type RestoreDirectoryAccessResult,
+    type QueueSaveResult,
     type QueueState,
     type RuntimeRequestMessage,
     type RuntimeResponse,
@@ -15,11 +16,6 @@ import { idb_clear_directory_handle, idb_load_directory_handle } from "./shared/
 import { create_logger } from "./shared/logger";
 
 const log = create_logger("background");
-
-type QueueSaveResult = Readonly<{
-    accepted_job_id: string;
-    queue_state: QueueState;
-}>;
 
 type GetQueueStateResult = Readonly<{
     queue_state: QueueState;

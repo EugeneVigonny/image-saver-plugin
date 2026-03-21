@@ -32,11 +32,5 @@ export default defineConfig({
         host_permissions: [
             "<all_urls>",
         ],
-        content_scripts: [
-            {
-                matches: ["<all_urls>"],
-                js: ["content-scripts/content.js"],
-            },
-        ],
     },
 });
