@@ -1,3 +1,4 @@
+/** Допустимые стадии job в pipeline сохранения. */
 export const job_status_values = [
     "queued",
     "downloading",
@@ -7,11 +8,14 @@ export const job_status_values = [
     "failed",
 ] as const;
 
+/** Значения `type` для `browser.runtime` сообщений (единый источник строк). */
 export const runtime_message_types = {
     queue_save: "queue_save",
     job_status: "job_status",
     get_queue_state: "get_queue_state",
     queue_state: "queue_state",
+    get_directory_access_state: "get_directory_access_state",
+    restore_directory_access: "restore_directory_access",
 } as const;
 
 export type JobStatus = (typeof job_status_values)[number];
@@ -56,6 +60,28 @@ export type SaveOutcome = SaveOutcomeOk | SaveOutcomeRetryableError | SaveOutcom
 
 export type PermissionState = "unknown" | "granted" | "prompt" | "denied" | "revoked";
 
+/** Состояние выбранной папки в UI popup; `error` — сбой операции, не ответ браузера. */
+export type PopupDirectoryState = "not_selected" | "granted" | "prompt" | "denied" | "error";
+
+/** Снимок экрана popup: имя из меты, флаги занятости и ошибки. */
+export type PopupViewModel = Readonly<{
+    directory_name: string | null;
+    permission_state: PopupDirectoryState;
+    is_busy: boolean;
+    last_error: string | null;
+}>;
+
+/** Ключи `chrome.storage.local`; живой handle хранится в IndexedDB, не здесь. */
+export const storage_keys = {
+    save_dir_handle: "save_dir_handle",
+    save_dir_meta: "save_dir_meta",
+} as const;
+
+export type SaveDirMeta = Readonly<{
+    name: string;
+    updated_at: number;
+}>;
+
 export type QueueSaveMessage = Readonly<{
     type: typeof runtime_message_types.queue_save;
     payload: SaveJob;
@@ -77,15 +103,38 @@ export type GetQueueStateMessage = Readonly<{
     type: typeof runtime_message_types.get_queue_state;
 }>;
 
+export type GetDirectoryAccessStateMessage = Readonly<{
+    type: typeof runtime_message_types.get_directory_access_state;
+}>;
+
+export type RestoreDirectoryAccessMessage = Readonly<{
+    type: typeof runtime_message_types.restore_directory_access;
+}>;
+
 export type QueueStateMessage = Readonly<{
     type: typeof runtime_message_types.queue_state;
     payload: QueueState;
 }>;
 
-export type RuntimeRequestMessage = QueueSaveMessage | GetQueueStateMessage;
+export type DirectoryAccessStateResult = Readonly<{
+    directory_name: string | null;
+    permission_state: PopupDirectoryState;
+}>;
+
+export type RestoreDirectoryAccessResult = Readonly<{
+    permission_state: PopupDirectoryState;
+    directory_name: string | null;
+}>;
+
+export type RuntimeRequestMessage =
+    | QueueSaveMessage
+    | GetQueueStateMessage
+    | GetDirectoryAccessStateMessage
+    | RestoreDirectoryAccessMessage;
 export type RuntimeEventMessage = JobStatusMessage | QueueStateMessage;
 export type RuntimeMessage = RuntimeRequestMessage | RuntimeEventMessage;
 
+/** Ошибка валидации на границе runtime (сообщение / ответ не по контракту). */
 export type RuntimeValidationError = Readonly<{
     code: "invalid_message";
     message: string;
@@ -102,6 +151,7 @@ export type RuntimeResponseError = Readonly<{
     error: RuntimeValidationError;
 }>;
 
+/** Унифицированный ответ use-case и `sendMessage`: успех с `data` или `ok: false` с `error`. */
 export type RuntimeResponse<TData> = RuntimeResponseOk<TData> | RuntimeResponseError;
 
 function is_object_record(value: unknown): value is Record<string, unknown> {
@@ -158,9 +208,7 @@ function is_save_outcome_fatal_error(value: unknown): value is SaveOutcomeFatalE
     );
 }
 
-/**
- * Проверяет, что value соответствует финальному результату pipeline.
- */
+/** Type guard: итог pipeline (`kind` discriminant). */
 export function is_save_outcome(value: unknown): value is SaveOutcome {
     return (
         is_save_outcome_ok(value) ||
@@ -169,9 +217,7 @@ export function is_save_outcome(value: unknown): value is SaveOutcome {
     );
 }
 
-/**
- * Проверяет обязательный доменный контракт job на входе runtime-границы.
- */
+/** Type guard: payload job до бизнес-логики (непустые строки, валидный `created_at`). */
 export function is_save_job(value: unknown): value is SaveJob {
     if (!is_object_record(value)) {
         return false;
@@ -222,9 +268,7 @@ function is_queue_state(value: unknown): value is QueueState {
     );
 }
 
-/**
- * Проверяет входящее сообщение постановки job в очередь.
- */
+/** Type guard: сообщение `queue_save` с валидным `SaveJob`. */
 export function is_queue_save_message(value: unknown): value is QueueSaveMessage {
     if (!is_object_record(value)) {
         return false;
@@ -233,9 +277,7 @@ export function is_queue_save_message(value: unknown): value is QueueSaveMessage
     return value["type"] === runtime_message_types.queue_save && is_save_job(value["payload"]);
 }
 
-/**
- * Проверяет событие изменения стадии job.
- */
+/** Type guard: событие `job_status` и payload стадии. */
 export function is_job_status_message(value: unknown): value is JobStatusMessage {
     if (!is_object_record(value)) {
         return false;
@@ -244,9 +286,7 @@ export function is_job_status_message(value: unknown): value is JobStatusMessage
     return value["type"] === runtime_message_types.job_status && is_job_status_payload(value["payload"]);
 }
 
-/**
- * Проверяет запрос snapshot состояния очереди.
- */
+/** Type guard: запрос `get_queue_state` без payload. */
 export function is_get_queue_state_message(value: unknown): value is GetQueueStateMessage {
     if (!is_object_record(value)) {
         return false;
@@ -255,9 +295,32 @@ export function is_get_queue_state_message(value: unknown): value is GetQueueSta
     return value["type"] === runtime_message_types.get_queue_state;
 }
 
+/** Type guard: запрос актуального доступа к сохранённой папке (чтение из SW). */
+export function is_get_directory_access_state_message(
+    value: unknown,
+): value is GetDirectoryAccessStateMessage {
+    if (!is_object_record(value)) {
+        return false;
+    }
+
+    return value["type"] === runtime_message_types.get_directory_access_state;
+}
+
 /**
- * Проверяет сообщение со snapshot состояния очереди.
+ * Type guard: сообщение `restore_directory_access`.
+ * @remarks В Chromium `requestPermission` из SW не поднимает диалог; восстановление — из popup.
  */
+export function is_restore_directory_access_message(
+    value: unknown,
+): value is RestoreDirectoryAccessMessage {
+    if (!is_object_record(value)) {
+        return false;
+    }
+
+    return value["type"] === runtime_message_types.restore_directory_access;
+}
+
+/** Type guard: событие `queue_state` с валидным snapshot очереди. */
 export function is_queue_state_message(value: unknown): value is QueueStateMessage {
     if (!is_object_record(value)) {
         return false;
@@ -266,16 +329,19 @@ export function is_queue_state_message(value: unknown): value is QueueStateMessa
     return value["type"] === runtime_message_types.queue_state && is_queue_state(value["payload"]);
 }
 
-/**
- * Проверяет, что сообщение допустимо как runtime-запрос в background.
- */
+/** Type guard: допустимый входящий запрос в обработчик `onMessage` background. */
 export function is_runtime_request_message(value: unknown): value is RuntimeRequestMessage {
-    return is_queue_save_message(value) || is_get_queue_state_message(value);
+    return (
+        is_queue_save_message(value) ||
+        is_get_queue_state_message(value) ||
+        is_get_directory_access_state_message(value) ||
+        is_restore_directory_access_message(value)
+    );
 }
 
 /**
- * Создает структурированную ошибку валидации runtime-сообщения.
- * @param details Контекст причины отказа для логирования и диагностики.
+ * Собирает `RuntimeValidationError` с кодом `invalid_message`.
+ * @param details Причина для UI/логов (короткая строка).
  */
 export function create_invalid_message_error(details: string): RuntimeValidationError {
     return {

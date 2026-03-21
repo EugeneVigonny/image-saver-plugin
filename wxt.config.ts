@@ -2,6 +2,10 @@ import { defineConfig } from 'wxt';
 
 // See https://wxt.dev/api/config.html
 export default defineConfig({
+    vite: () => ({
+        // `WXT_*` доступны в `import.meta.env` наряду со стандартным префиксом Vite
+        envPrefix: ["VITE_", "WXT_"],
+    }),
     manifest: {
         name: "Image Saver Plugin",
         version: "1.0.0",
