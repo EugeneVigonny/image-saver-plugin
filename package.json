@@ -15,6 +15,7 @@
     "postinstall": "wxt prepare"
   },
   "devDependencies": {
+    "@types/pica": "^9.0.5",
     "typescript": "^5.9.3",
     "wxt": "^0.20.20"
   },
