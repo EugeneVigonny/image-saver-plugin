@@ -1,4 +1,5 @@
-import { LOG_DEV } from "./log_flags";
+export const LOG_DEV: boolean =
+    import.meta.env.PROD !== true || import.meta.env["WXT_IMAGE_SAVER_LOG_DEV"] === "true";
 
 /**
  * Логгер с префиксом `[image-saver:<scope>]`.
