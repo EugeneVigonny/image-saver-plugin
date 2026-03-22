@@ -1,4 +1,4 @@
-export type ResolveImageUrlFailureReason = "unsupported_scheme" | "empty" | "invalid_url" | "svg";
+export type ResolveImageUrlFailureReason = "unsupported_scheme" | "empty" | "invalid_url" | "svg" | "sample";
 
 export type ResolveImageUrlResult =
     | Readonly<{ ok: true; url: string }>
@@ -11,6 +11,34 @@ function pathname_looks_like_svg_file(pathname: string): boolean {
 
 function raw_is_data_svg_xml(raw: string): boolean {
     return /^data:image\/svg\+xml/i.test(raw.trim());
+}
+
+/** Превью/плейсхолдеры: подстрока `sample` в исходном src или в разрешённом href. */
+function url_contains_sample_token(raw: string, absolute_href: string): boolean {
+    return raw.toLowerCase().includes("sample") || absolute_href.toLowerCase().includes("sample");
+}
+
+/**
+ * Игнор: в `src` или в каноническом http(s) URL есть подстрока `sample` (без учёта регистра).
+ * @remarks См. trade-off в `stage-6-naming-and-cache.md` §6.0.
+ */
+export function is_sample_placeholder_image_element(img: HTMLImageElement, base_href: string): boolean {
+    const raw = (img.currentSrc || img.src || "").trim();
+    if (raw.length === 0) {
+        return false;
+    }
+    if (raw.toLowerCase().includes("sample")) {
+        return true;
+    }
+    try {
+        const parsed = new URL(raw, base_href);
+        if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+            return false;
+        }
+        return parsed.href.toLowerCase().includes("sample");
+    } catch {
+        return false;
+    }
 }
 
 /**
@@ -38,7 +66,7 @@ export function is_svg_image_element(img: HTMLImageElement, base_href: string): 
     return false;
 }
 
-/** Абсолютный http(s) URL для `SaveJob` или код причины отказа (пусто / не URL / не http(s) / svg). */
+/** Абсолютный http(s) URL для `SaveJob` или код причины отказа (в т.ч. svg / sample). */
 export function resolve_image_url_from_element(img: HTMLImageElement, base_href: string): ResolveImageUrlResult {
     const raw = (img.currentSrc || img.src || "").trim();
     if (raw.length === 0) {
@@ -55,6 +83,10 @@ export function resolve_image_url_from_element(img: HTMLImageElement, base_href:
     const scheme = parsed.protocol.toLowerCase();
     if (scheme !== "http:" && scheme !== "https:") {
         return { ok: false, reason: "unsupported_scheme" };
+    }
+
+    if (url_contains_sample_token(raw, parsed.href)) {
+        return { ok: false, reason: "sample" };
     }
 
     if (pathname_looks_like_svg_file(parsed.pathname)) {
