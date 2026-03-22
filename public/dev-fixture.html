@@ -5,13 +5,47 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Image Saver — dev fixture</title>
   <style>
-    body { font-family: system-ui, sans-serif; padding: 1rem; max-width: 48rem; }
+    body { font-family: system-ui, sans-serif; padding: 1rem; max-width: 56rem; }
     img { max-width: 100%; height: auto; display: block; margin: 1rem 0; border: 1px solid #ccc; }
+    .fixture-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(14rem, 1fr));
+      gap: 1rem;
+      align-items: start;
+    }
+    .fixture-card { margin: 0; }
+    .fixture-card figcaption { font-size: 0.85rem; color: #444; margin-top: 0.35rem; }
   </style>
 </head>
 <body>
   <h1>Dev fixture</h1>
   <p>Страница для проверки content script</p>
+
+  <h2>SVG (игнор расширения)</h2>
   <img src="/wxt.svg" alt="Local from public/" width="128" height="128" />
+
+  <h2>Тестовые JPEG из <code>public/img/</code></h2>
+  <div class="fixture-grid">
+    <figure class="fixture-card">
+      <img src="/img/thumbnail_1280x720.jpg" alt="1280×720" width="1280" height="720" loading="lazy" />
+      <figcaption>thumbnail_1280x720.jpg — 1280×720</figcaption>
+    </figure>
+    <figure class="fixture-card">
+      <img src="/img/thumbnail_1440x2560.jpg" alt="1440×2560" width="1440" height="2560" loading="lazy" />
+      <figcaption>thumbnail_1440x2560.jpg — 1440×2560 (портрет)</figcaption>
+    </figure>
+    <figure class="fixture-card">
+      <img src="/img/thumbnail_1920x1080.jpg" alt="1920×1080" width="1920" height="1080" loading="lazy" />
+      <figcaption>thumbnail_1920x1080.jpg — 1920×1080</figcaption>
+    </figure>
+    <figure class="fixture-card">
+      <img src="/img/thumbnail_2560x1440.jpg" alt="2560×1440" width="2560" height="1440" loading="lazy" />
+      <figcaption>thumbnail_2560x1440.jpg — 2560×1440</figcaption>
+    </figure>
+    <figure class="fixture-card">
+      <img src="/img/thumbnail_3200x1800.jpg" alt="3200×1800" width="3200" height="1800" loading="lazy" />
+      <figcaption>thumbnail_3200x1800.jpg — 3200×1800</figcaption>
+    </figure>
+  </div>
 </body>
 </html>

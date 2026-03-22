@@ -1,3 +1,16 @@
+import { is_svg_image_element } from "./resolve_image_url";
+
+function document_base_href(root: Document | Element): string {
+    if (root instanceof Document) {
+        return root.URL || root.documentURI || "";
+    }
+    return (
+        root.ownerDocument?.URL ??
+        root.ownerDocument?.documentURI ??
+        (typeof globalThis.location?.href === "string" ? globalThis.location.href : "")
+    );
+}
+
 /** `img` внутри кнопки с иконками `+`/`✓`/спиннер — не целевые картинки страницы. */
 function is_overlay_control_image(img: HTMLImageElement): boolean {
     return img.closest(".image-saver-plugin__btn") !== null;
@@ -11,9 +24,10 @@ function is_likely_tracking_pixel(img: HTMLImageElement): boolean {
 }
 
 /**
- * Сканирует `img` под `root`, исключая оверлей расширения и микро-изображения.
+ * Сканирует `img` под `root`, исключая оверлей расширения, микро-изображения и SVG.
  */
 export function query_image_elements(root: Document | Element): HTMLImageElement[] {
+    const base_href = document_base_href(root);
     const nodes = root.querySelectorAll("img");
     const out: HTMLImageElement[] = [];
     for (const node of nodes) {
@@ -24,6 +38,9 @@ export function query_image_elements(root: Document | Element): HTMLImageElement
             continue;
         }
         if (is_likely_tracking_pixel(node)) {
+            continue;
+        }
+        if (is_svg_image_element(node, base_href.length > 0 ? base_href : globalThis.location.href)) {
             continue;
         }
         out.push(node);
