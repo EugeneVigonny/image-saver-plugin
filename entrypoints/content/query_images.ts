@@ -1,7 +1,6 @@
-import { IMAGE_SAVER_ROOT_ATTR } from "./constants";
-
-function is_inside_image_saver_overlay(element: Element): boolean {
-    return element.closest(`[${IMAGE_SAVER_ROOT_ATTR}]`) !== null;
+/** `img` внутри кнопки с иконками `+`/`✓`/спиннер — не целевые картинки страницы. */
+function is_overlay_control_image(img: HTMLImageElement): boolean {
+    return img.closest(".image-saver-plugin__btn") !== null;
 }
 
 /** Трекинг-пиксели и пустые превью. */
@@ -21,7 +20,7 @@ export function query_image_elements(root: Document | Element): HTMLImageElement
         if (!(node instanceof HTMLImageElement)) {
             continue;
         }
-        if (is_inside_image_saver_overlay(node)) {
+        if (is_overlay_control_image(node)) {
             continue;
         }
         if (is_likely_tracking_pixel(node)) {

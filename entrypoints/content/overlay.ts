@@ -61,6 +61,7 @@ function create_icon_layer(src: string, alt: string, extra_class?: string): HTML
     return el;
 }
 
+/** Обертка вокруг страничного `img`: кнопка «сохранить», визуальные стадии, вызов `queue_save`. */
 export class ImageOverlayController {
     private readonly img: HTMLImageElement;
     private readonly deps: OverlayDeps;

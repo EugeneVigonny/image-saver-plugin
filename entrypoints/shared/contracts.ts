@@ -1,3 +1,8 @@
+/**
+ * Контракты `browser.runtime` (запросы/ответы/события), снимок очереди и type guards.
+ * Литералы `type` сообщений — только из `runtime_message_types`.
+ */
+
 /** Допустимые стадии job в pipeline сохранения. */
 export const job_status_values = [
     "queued",
@@ -29,6 +34,36 @@ export type SaveJob = Readonly<{
     created_at: number;
 }>;
 
+/**
+ * Запись в персистентной очереди (снимок в `chrome.storage.local`).
+ * Терминальные `done`/`failed` в хранилище не держим — запись удаляется после завершения pipeline.
+ */
+export type QueuedJobRecord = Readonly<{
+    job: SaveJob;
+    status: JobStatus;
+    last_error?: string;
+}>;
+
+/** Версия схемы снимка очереди; инкремент при несовместимых изменениях. */
+export const QUEUE_SNAPSHOT_SCHEMA_VERSION = 1 as const;
+
+/**
+ * Снимок очереди (один ключ в `storage.local`).
+ * `jobs` — только незавершённые стадии (`queued` … `writing`).
+ */
+export type QueueSnapshot = Readonly<{
+    schema_version: typeof QUEUE_SNAPSHOT_SCHEMA_VERSION;
+    jobs: QueuedJobRecord[];
+    processing_job_id: string | null;
+    updated_at: number;
+}>;
+
+/**
+ * Публичный снимок для UI / `get_queue_state`.
+ * `pending_jobs` — `SaveJob` для записей, ещё не дошедших до терминала (все элементы `jobs` в snapshot).
+ * `total_jobs` — `jobs.length` (совпадает с `pending_jobs.length`).
+ * `processing_job_id` — job, который сейчас обрабатывает single-consumer (или null).
+ */
 export type QueueState = Readonly<{
     pending_jobs: SaveJob[];
     processing_job_id: string | null;
@@ -40,6 +75,8 @@ export type QueueState = Readonly<{
 export type QueueSaveResult = Readonly<{
     accepted_job_id: string;
     queue_state: QueueState;
+    /** `true`, если тот же dedup-ключ уже был в незавершённой очереди. */
+    was_duplicate?: boolean;
 }>;
 
 export type SaveOutcomeOk = Readonly<{
@@ -81,11 +118,17 @@ export type PopupViewModel = Readonly<{
 export const storage_keys = {
     save_dir_handle: "save_dir_handle",
     save_dir_meta: "save_dir_meta",
+    /** JSON `QueueSnapshot` — атомарный снимок очереди. */
+    queue_snapshot: "image_saver_queue_snapshot_v1",
 } as const;
+
+/** Снимок read/write сразу после жеста в popup; SW может ещё долго отдавать `prompt` для того же handle. */
+export type SaveDirReadwriteSnapshot = "granted" | "prompt" | "denied";
 
 export type SaveDirMeta = Readonly<{
     name: string;
     updated_at: number;
+    readwrite_at_pick?: SaveDirReadwriteSnapshot;
 }>;
 
 export type QueueSaveMessage = Readonly<{
@@ -223,6 +266,20 @@ export function is_save_outcome(value: unknown): value is SaveOutcome {
     );
 }
 
+/** Статусы, при которых job ещё в очереди / pipeline (не терминал). */
+export function is_non_terminal_job_status(status: JobStatus): boolean {
+    return status === "queued" || status === "downloading" || status === "resizing" || status === "writing";
+}
+
+/** Type guard: запись персистентной очереди. */
+export function is_queued_job_record(value: unknown): value is QueuedJobRecord {
+    if (!is_object_record(value)) {
+        return false;
+    }
+
+    return is_save_job(value["job"]) && is_job_status(value["status"]) && is_non_terminal_job_status(value["status"]);
+}
+
 /** Type guard: payload job до бизнес-логики (непустые строки, валидный `created_at`). */
 export function is_save_job(value: unknown): value is SaveJob {
     if (!is_object_record(value)) {
@@ -313,8 +370,8 @@ export function is_get_directory_access_state_message(
 }
 
 /**
- * Type guard: сообщение `restore_directory_access`.
- * @remarks В Chromium `requestPermission` из SW не поднимает диалог; восстановление — из popup.
+ * Type guard: запрос `restore_directory_access`.
+ * @remarks В Chromium `requestPermission` из SW без жеста не поднимает диалог — вызывать из popup.
  */
 export function is_restore_directory_access_message(
     value: unknown,
@@ -345,10 +402,7 @@ export function is_runtime_request_message(value: unknown): value is RuntimeRequ
     );
 }
 
-/**
- * Собирает `RuntimeValidationError` с кодом `invalid_message`.
- * @param details Причина для UI/логов (короткая строка).
- */
+/** Собирает `RuntimeValidationError` с кодом `invalid_message` для ответа из background. */
 export function create_invalid_message_error(details: string): RuntimeValidationError {
     return {
         code: "invalid_message",

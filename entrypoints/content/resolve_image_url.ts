@@ -4,11 +4,7 @@ export type ResolveImageUrlResult =
     | Readonly<{ ok: true; url: string }>
     | Readonly<{ ok: false; reason: ResolveImageUrlFailureReason }>;
 
-/**
- * Разрешает URL картинки для постановки в очередь (MVP: только http/https).
- * @param img Целевой элемент.
- * @param base_href Обычно `location.href` страницы.
- */
+/** Абсолютный http(s) URL для `SaveJob` или код причины отказа (пусто / не URL / не http(s)). */
 export function resolve_image_url_from_element(img: HTMLImageElement, base_href: string): ResolveImageUrlResult {
     const raw = (img.currentSrc || img.src || "").trim();
     if (raw.length === 0) {

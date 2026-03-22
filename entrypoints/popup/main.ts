@@ -2,8 +2,6 @@ import "./style.css";
 import {
     runtime_message_types,
     storage_keys,
-    type DirectoryAccessStateResult,
-    type GetDirectoryAccessStateMessage,
     type PopupDirectoryState,
     type PopupViewModel,
     type RestoreDirectoryAccessMessage,
@@ -14,6 +12,7 @@ import {
 import { create_logger } from "@/entrypoints/shared/logger";
 import { idb_load_directory_handle, idb_save_directory_handle } from "@/entrypoints/shared/directory_handle_idb";
 import { normalize_runtime_send_message_result } from "@/entrypoints/shared/normalize_runtime_response";
+import { send_get_directory_access_state_message } from "@/entrypoints/shared/send_get_directory_access_state_message";
 
 const log = create_logger("popup");
 
@@ -30,6 +29,23 @@ type SelectDirectoryResult = Readonly<{
     directory_name: string;
     permission_state: PopupDirectoryState;
 }>;
+
+/**
+ * Итог выбора папки: отмена диалога либо обычный `RuntimeResponse` с именем и `permission_state`.
+ */
+export type SelectDirectoryUseCaseResult =
+    | { readonly user_cancelled: true }
+    | RuntimeResponse<SelectDirectoryResult>;
+
+function is_user_abort_directory_picker_error(error: unknown): boolean {
+    if (error instanceof DOMException && error.name === "AbortError") {
+        return true;
+    }
+    if (error instanceof Error && error.name === "AbortError") {
+        return true;
+    }
+    return false;
+}
 
 type PermissionDescriptor = {
     mode: "read" | "readwrite";
@@ -72,27 +88,7 @@ function create_error_response(details: string): RuntimeResponse<never> {
     };
 }
 
-/** Запрашивает у background `queryPermission` по handle из IndexedDB и имя из меты. */
-export async function send_get_directory_access_state_message(): Promise<
-    RuntimeResponse<DirectoryAccessStateResult>
-> {
-    log.debug("send_get_directory_access_state_message");
-    const message: GetDirectoryAccessStateMessage = {
-        type: runtime_message_types.get_directory_access_state,
-    };
-    const raw = await browser.runtime.sendMessage(message);
-    const response = normalize_runtime_send_message_result<DirectoryAccessStateResult>(
-        raw,
-        "send_get_directory_access_state_message",
-    );
-    log.info("send_get_directory_access_state_message done", { ok: response.ok });
-    return response;
-}
-
-/**
- * Прокси на сообщение `restore_directory_access` в SW.
- * @remarks Диалог доступа не поднимается из SW; для UI используй `restore_directory_access_popup_use_case`.
- */
+/** Прокси `restore_directory_access` в SW (без user gesture диалог из SW не показать). */
 export async function send_restore_directory_access_message(): Promise<
     RuntimeResponse<RestoreDirectoryAccessResult>
 > {
@@ -109,7 +105,10 @@ export async function send_restore_directory_access_message(): Promise<
     return response;
 }
 
-/** `requestPermission` по handle из IndexedDB; вызывать только из обработчика клика (user gesture). */
+/**
+ * Восстановление read/write по сохранённому handle из IDB.
+ * @remarks Только из обработчика клика; обновляет `save_dir_meta.readwrite_at_pick`.
+ */
 export async function restore_directory_access_popup_use_case(): Promise<
     RuntimeResponse<RestoreDirectoryAccessResult>
 > {
@@ -132,6 +131,26 @@ export async function restore_directory_access_popup_use_case(): Promise<
         const permission_state: PopupDirectoryState =
             permission === "granted" ? "granted" : permission === "prompt" ? "prompt" : "denied";
 
+        const readwrite_at_pick: NonNullable<SaveDirMeta["readwrite_at_pick"]> =
+            permission === "granted" ? "granted" : permission === "prompt" ? "prompt" : "denied";
+        const meta_name =
+            typeof meta?.name === "string"
+                ? meta.name
+                : handle.name !== ""
+                  ? handle.name
+                  : "selected_directory";
+        try {
+            await browser.storage.local.set({
+                [storage_keys.save_dir_meta]: {
+                    name: meta_name,
+                    updated_at: Date.now(),
+                    readwrite_at_pick,
+                } satisfies SaveDirMeta,
+            });
+        } catch (e) {
+            log.warn("restore_directory_access: failed to persist save_dir_meta", { e });
+        }
+
         log.info("restore_directory_access_popup_use_case done", { permission_state });
         return {
             ok: true,
@@ -147,8 +166,11 @@ export async function restore_directory_access_popup_use_case(): Promise<
     }
 }
 
-/** Picker папки, запись handle в IndexedDB и меты в `storage.local`. */
-export async function select_directory_use_case(): Promise<RuntimeResponse<SelectDirectoryResult>> {
+/**
+ * `showDirectoryPicker`, persist handle в IDB и `save_dir_meta` (`readwrite_at_pick`).
+ * @remarks Отмена пользователем → `{ user_cancelled: true }` (не ошибка `RuntimeResponse`).
+ */
+export async function select_directory_use_case(): Promise<SelectDirectoryUseCaseResult> {
     log.info("select_directory_use_case start");
     try {
         const window_with_picker = window as Window & {
@@ -163,9 +185,12 @@ export async function select_directory_use_case(): Promise<RuntimeResponse<Selec
         const permission_state: PopupDirectoryState =
             permission === "granted" ? "granted" : permission === "prompt" ? "prompt" : "denied";
         const directory_name = handle.name ?? "selected_directory";
+        const readwrite_at_pick: NonNullable<SaveDirMeta["readwrite_at_pick"]> =
+            permission === "granted" ? "granted" : permission === "prompt" ? "prompt" : "denied";
         const meta: SaveDirMeta = {
             name: directory_name,
             updated_at: Date.now(),
+            readwrite_at_pick,
         };
 
         try {
@@ -192,6 +217,10 @@ export async function select_directory_use_case(): Promise<RuntimeResponse<Selec
             },
         };
     } catch (error) {
+        if (is_user_abort_directory_picker_error(error)) {
+            log.debug("select_directory_use_case: user cancelled directory picker");
+            return { user_cancelled: true };
+        }
         const details = error instanceof Error ? error.message : "Unknown directory picker error";
         log.warn("select_directory_use_case failed", { details, error });
         return create_error_response(details);
@@ -229,6 +258,9 @@ async function on_select_directory_click(): Promise<void> {
     set_busy(true);
     try {
         const response = await select_directory_use_case();
+        if ("user_cancelled" in response) {
+            return;
+        }
         if (!response.ok) {
             set_view_model({
                 ...view_model,

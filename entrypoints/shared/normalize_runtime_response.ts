@@ -10,8 +10,8 @@ function is_runtime_response_shape(value: unknown): value is RuntimeResponse<unk
 }
 
 /**
- * Нормализует ответ `runtime.sendMessage`: при `undefined` или неверной форме — `ok: false`.
- * @param context Метка вызывающей стороны для поля `details`.
+ * Приводит сырой ответ `sendMessage` к `RuntimeResponse`; иначе `ok: false` с подсказкой в `details`.
+ * @param context Метка вызова для диагностики (попадает в `error.details`).
  */
 export function normalize_runtime_send_message_result<T>(
     raw: unknown,

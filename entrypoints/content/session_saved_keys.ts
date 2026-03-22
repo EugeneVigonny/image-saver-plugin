@@ -1,6 +1,9 @@
 import { SESSION_SAVED_DEDUP_KEYS, SESSION_SAVED_KEYS_CAP } from "./constants";
 
-/** Множество успешно сохранённых dedup-ключей за сессию (`chrome.storage.session`). */
+/**
+ * Dedup-ключи успешных сохранений за жизнь вкладки (`chrome.storage.session`).
+ * @remarks `ensure_loaded` перед проверкой `has`, иначе множество пустое до первой загрузки.
+ */
 export class SessionSavedDedupRegistry {
     private readonly keys = new Set<string>();
     private load_promise: Promise<void> | null = null;

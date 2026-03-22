@@ -1,4 +1,6 @@
-/** Хранение живого `FileSystemDirectoryHandle` (не `chrome.storage`: методы теряются). Общая БД для popup и SW. */
+/**
+ * IndexedDB одного origin расширения: живой `FileSystemDirectoryHandle` (в `chrome.storage` не сериализуется).
+ */
 const db_name = "image_saver_directory_v1";
 const store_name = "handles";
 const record_key = "save_dir";

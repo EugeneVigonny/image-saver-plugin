@@ -1,7 +1,2 @@
-/**
- * Стабильный ключ идемпотентности job на клиенте (совпадает с логикой background при расширении).
- * Разделитель `\u0000` не встречается в URL и имени файла.
- */
-export function make_job_dedup_key(canonical_url: string, suggested_name: string): string {
-    return `${canonical_url}\u0000${suggested_name}`;
-}
+/** Реэкспорт ключа дедупа job для content-слоя. */
+export { make_job_dedup_key } from "../shared/job_dedup_key";
