@@ -162,10 +162,16 @@ export default defineBackground(() => {
                     if (directory === null) {
                         throw new Error("Save directory not selected");
                     }
-                    const meta_for_permission = await read_save_dir_meta();
                     const permission = await settle_readwrite_permission(directory);
-                    if (!is_readwrite_effective_in_extension(permission, meta_for_permission)) {
-                        throw new Error("Directory permission not granted (open extension popup to restore access)");
+                    /**
+                     * Запись и `getFileHandle` в SW требуют **фактического** `queryPermission === "granted"`.
+                     * `is_readwrite_effective_in_extension` (мета popup при «залипшем» `prompt`) — только для UI content/popup;
+                     * при `prompt` браузер всё равно режет FS API → NotAllowedError на `getFileHandle`.
+                     */
+                    if (permission !== "granted") {
+                        throw new Error(
+                            "Directory read/write is not granted in the service worker (open the extension popup once to refresh permission).",
+                        );
                     }
 
                     const file_name = await write_blob_to_directory(directory, next.job.suggested_name, jpeg_blob);
@@ -361,7 +367,10 @@ export default defineBackground(() => {
         return "not_selected";
     }
 
-    /** `granted` в SW или недавний `granted` из popup при «залипшем» `prompt` в SW. */
+    /**
+     * Только для **отображения** состояния (content/popup): «как будто granted», если popup недавно подтвердил readwrite.
+     * Для **записи на диск** из SW см. строгую проверку `permission === "granted"` в `process_queue_loop`.
+     */
     function is_readwrite_effective_in_extension(
         raw_sw_permission: PermissionState,
         meta_row: SaveDirMeta | null,
@@ -392,6 +401,7 @@ export default defineBackground(() => {
                     data: {
                         directory_name: null,
                         permission_state: "not_selected",
+                        service_worker_readwrite_granted: false,
                     },
                 };
             }
@@ -406,6 +416,7 @@ export default defineBackground(() => {
                     data: {
                         directory_name: null,
                         permission_state: "not_selected",
+                        service_worker_readwrite_granted: false,
                     },
                 };
             }
@@ -422,8 +433,10 @@ export default defineBackground(() => {
                 });
                 permission_state = "granted";
             }
+            const service_worker_readwrite_granted = permission === "granted";
             log.info("get_directory_access_state_use_case", {
                 permission_state,
+                service_worker_readwrite_granted,
                 has_directory_name: directory_name !== null,
             });
             return {
@@ -431,6 +444,7 @@ export default defineBackground(() => {
                 data: {
                     directory_name,
                     permission_state,
+                    service_worker_readwrite_granted,
                 },
             };
         } catch (error) {

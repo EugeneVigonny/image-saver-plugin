@@ -10,7 +10,8 @@ import { normalize_runtime_send_message_result } from "./normalize_runtime_respo
 const log = create_logger("runtime");
 
 /**
- * Состояние сохранённой папки из SW (`queryPermission` + доверие к `readwrite_at_pick` в meta при «залипшем» prompt).
+ * Состояние сохранённой папки из SW: `permission_state` может быть оптимистичным;
+ * для записи смотри `service_worker_readwrite_granted`.
  */
 export async function send_get_directory_access_state_message(): Promise<
     RuntimeResponse<DirectoryAccessStateResult>
@@ -29,6 +30,7 @@ export async function send_get_directory_access_state_message(): Promise<
         log.debug("send_get_directory_access_state_message data", {
             permission_state: response.data.permission_state,
             directory_name: response.data.directory_name,
+            service_worker_readwrite_granted: response.data.service_worker_readwrite_granted,
         });
     } else {
         log.debug("send_get_directory_access_state_message error", { details: response.error.details });

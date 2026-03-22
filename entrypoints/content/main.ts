@@ -16,7 +16,7 @@ const observer_debounce_ms = 100;
 function is_save_directory_granted(
     response: Awaited<ReturnType<typeof send_get_directory_access_state_message>>,
 ): boolean {
-    return response.ok && response.data.permission_state === "granted";
+    return response.ok && response.data.service_worker_readwrite_granted;
 }
 
 /**

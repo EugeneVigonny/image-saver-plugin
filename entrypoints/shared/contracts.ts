@@ -110,6 +110,8 @@ export type PopupDirectoryState = "not_selected" | "granted" | "prompt" | "denie
 export type PopupViewModel = Readonly<{
     directory_name: string | null;
     permission_state: PopupDirectoryState;
+    /** См. `DirectoryAccessStateResult.service_worker_readwrite_granted`. */
+    service_worker_readwrite_granted: boolean;
     is_busy: boolean;
     last_error: string | null;
 }>;
@@ -167,7 +169,13 @@ export type QueueStateMessage = Readonly<{
 
 export type DirectoryAccessStateResult = Readonly<{
     directory_name: string | null;
+    /** UI/оптимистично: «доверие» к `readwrite_at_pick` при `prompt` в SW. */
     permission_state: PopupDirectoryState;
+    /**
+     * Фактический `queryPermission('readwrite')` в service worker после settle.
+     * Запись на диск и `getFileHandle` возможны только при `true`.
+     */
+    service_worker_readwrite_granted: boolean;
 }>;
 
 export type RestoreDirectoryAccessResult = Readonly<{

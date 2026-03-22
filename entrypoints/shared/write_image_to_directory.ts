@@ -30,11 +30,26 @@ export async function pick_unique_filename(
     return candidate;
 }
 
+async function write_blob_to_file_handle(handle: FileSystemFileHandle, blob: Blob): Promise<void> {
+    const writable = await handle.createWritable();
+    try {
+        /** В SW надёжнее писать `BufferSource`, чем `Blob` (меньше сюрпризов с clone). */
+        const bytes = new Uint8Array(await blob.arrayBuffer());
+        await writable.write(bytes);
+    } finally {
+        try {
+            await writable.close();
+        } catch {
+            /* Chromium SW: `close()` иногда бросает NotAllowedError после успешного write */
+        }
+    }
+}
+
 /**
  * Создаёт файл в каталоге и пишет `blob`.
- * @remarks Если файл с **точным** `suggested_name` уже есть — запись не выполняется
- * (повторное сохранение того же имени не даёт `name_1.ext`). Иначе имя может отличаться
- * после `pick_unique_filename`, если занято другое содержимое с тем же basename.
+ * @remarks Если файл с **точным** `suggested_name` уже есть — запись не выполняется (идемпотентность).
+ * Не вызываем `directory.values()`: обход каталога в MV3 service worker даёт
+ * `NotAllowedError` после перезагрузки страницы; имя уже уникально, если файла нет (`getFileHandle` create:false).
  */
 export async function write_blob_to_directory(
     directory: FileSystemDirectoryHandle,
@@ -51,16 +66,10 @@ export async function write_blob_to_directory(
         log.debug("write_blob_to_directory: already on disk, skip write", { suggested_name });
         return suggested_name;
     } catch {
-        /* нет файла с таким именем — создаём */
+        /* файла нет — создаём только этот путь, без полного листинга каталога */
     }
-    const name = await pick_unique_filename(directory, suggested_name);
-    const handle = await directory.getFileHandle(name, { create: true });
-    const writable = await handle.createWritable();
-    try {
-        await writable.write(blob);
-    } finally {
-        await writable.close();
-    }
-    log.debug("write_blob_to_directory: done", { name });
-    return name;
+    const handle = await directory.getFileHandle(suggested_name, { create: true });
+    await write_blob_to_file_handle(handle, blob);
+    log.debug("write_blob_to_directory: done", { name: suggested_name });
+    return suggested_name;
 }

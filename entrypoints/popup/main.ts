@@ -61,6 +61,7 @@ const app = document.querySelector<HTMLDivElement>("#app") as HTMLDivElement;
 let view_model: PopupViewModel = {
     directory_name: null,
     permission_state: "not_selected",
+    service_worker_readwrite_granted: false,
     is_busy: false,
     last_error: null,
 };
@@ -227,6 +228,12 @@ export async function select_directory_use_case(): Promise<SelectDirectoryUseCas
     }
 }
 
+/**
+ * `requestPermission` нельзя вызывать после `await` без нового жеста: будет
+ * `SecurityError: User activation is required`. Поэтому подтверждение доступа — только из
+ * обработчика клика («Подтвердить доступ к папке» / выбор папки), не при `init` popup.
+ */
+
 async function sync_access_state(): Promise<void> {
     log.debug("sync_access_state");
     const response = await send_get_directory_access_state_message();
@@ -235,16 +242,21 @@ async function sync_access_state(): Promise<void> {
         set_view_model({
             ...view_model,
             permission_state: "error",
+            service_worker_readwrite_granted: false,
             last_error: response.error.details,
         });
         return;
     }
 
-    log.info("sync_access_state ok", { permission_state: response.data.permission_state });
+    log.info("sync_access_state ok", {
+        permission_state: response.data.permission_state,
+        service_worker_readwrite_granted: response.data.service_worker_readwrite_granted,
+    });
     set_view_model({
         ...view_model,
         directory_name: response.data.directory_name,
         permission_state: response.data.permission_state,
+        service_worker_readwrite_granted: response.data.service_worker_readwrite_granted,
         last_error: null,
     });
 }
@@ -265,6 +277,7 @@ async function on_select_directory_click(): Promise<void> {
             set_view_model({
                 ...view_model,
                 permission_state: "error",
+                service_worker_readwrite_granted: false,
                 last_error: response.error.details,
             });
             return;
@@ -273,6 +286,7 @@ async function on_select_directory_click(): Promise<void> {
             ...view_model,
             directory_name: response.data.directory_name,
             permission_state: response.data.permission_state,
+            service_worker_readwrite_granted: response.data.permission_state === "granted",
             last_error: null,
         });
     } finally {
@@ -295,6 +309,7 @@ async function on_restore_access_click(): Promise<void> {
             set_view_model({
                 ...view_model,
                 permission_state: "error",
+                service_worker_readwrite_granted: false,
                 last_error: response.error.details,
             });
             return;
@@ -303,6 +318,7 @@ async function on_restore_access_click(): Promise<void> {
             ...view_model,
             directory_name: response.data.directory_name,
             permission_state: response.data.permission_state,
+            service_worker_readwrite_granted: response.data.permission_state === "granted",
             last_error: null,
         });
     } finally {
@@ -312,13 +328,29 @@ async function on_restore_access_click(): Promise<void> {
     }
 }
 
+function format_worker_write_line(): string {
+    if (view_model.permission_state === "not_selected") {
+        return "— (выберите папку)";
+    }
+    if (view_model.service_worker_readwrite_granted) {
+        return "разрешена";
+    }
+    return "нет — нажмите «Подтвердить доступ к папке»";
+}
+
 function render_action_button(): string {
     const disabled_attr = view_model.is_busy ? "disabled" : "";
+    const needs_sw_gate =
+        view_model.directory_name !== null && !view_model.service_worker_readwrite_granted;
     if (view_model.permission_state === "not_selected") {
         return `<button id="select-directory" ${disabled_attr}>Выбрать папку</button>`;
     }
-    if (view_model.permission_state === "prompt" || view_model.permission_state === "denied") {
-        return `<button id="restore-access" ${disabled_attr}>Восстановить доступ</button>`;
+    if (
+        needs_sw_gate ||
+        view_model.permission_state === "prompt" ||
+        view_model.permission_state === "denied"
+    ) {
+        return `<button id="restore-access" ${disabled_attr}>Подтвердить доступ к папке</button>`;
     }
     if (view_model.permission_state === "granted") {
         return `<button id="select-directory" ${disabled_attr}>Сменить папку</button>`;
@@ -331,6 +363,7 @@ function render(): void {
         <main class="popup-root">
             <h1>Image Saver</h1>
             <p>Состояние доступа: <strong>${view_model.permission_state}</strong></p>
+            <p>Запись из worker: <strong>${format_worker_write_line()}</strong></p>
             <p>Текущая папка: <strong>${view_model.directory_name ?? "не выбрана"}</strong></p>
             <div class="popup-actions">
                 ${render_action_button()}
@@ -355,4 +388,7 @@ function render(): void {
 }
 
 render();
-void sync_access_state();
+
+void sync_access_state().catch((error: unknown) => {
+    log.warn("sync_access_state on load failed", { error });
+});
