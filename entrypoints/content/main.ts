@@ -4,9 +4,10 @@ import { is_directory_access_updated_message } from "../shared/directory_access_
 import { create_logger } from "../shared/logger";
 import { send_get_directory_access_state_message } from "../shared/send_get_directory_access_state_message";
 import { subscribe_image_dom_changes } from "./image_observer";
+import { create_job_outcome_hub, type JobOutcomeHub } from "./job_outcome_hub";
 import { ImageOverlayController } from "./overlay";
+import { OutcomeCacheRegistry } from "./outcome_cache";
 import { query_image_elements } from "./query_images";
-import { SessionSavedDedupRegistry } from "./session_saved_keys";
 
 const log = create_logger("content");
 
@@ -20,16 +21,24 @@ function is_save_directory_granted(
 
 /**
  * Оверлеи на изображениях при `permission_state === "granted"` для папки сохранения.
- * @remarks Подписки: `storage.onChanged`, пинг из SW, `visibilitychange`; снятие на `pagehide`.
+ * @remarks Подписки: `storage.onChanged`, пинг из SW, `visibilitychange`, `job_status`; снятие на `pagehide`.
  */
 export function run_content_app(): void {
-    const registry = new SessionSavedDedupRegistry();
+    const outcome_cache = new OutcomeCacheRegistry();
     const in_flight = new Set<string>();
-    const deps = { registry, in_flight };
     const active = new Map<HTMLImageElement, ImageOverlayController>();
 
     let overlays_enabled = false;
     let observer: Readonly<{ disconnect(): void }> | null = null;
+    let job_hub: JobOutcomeHub;
+
+    const deps = {
+        outcome_cache,
+        in_flight,
+        register_pending_save: (accepted_job_id: string, dedup_key: string): void => {
+            job_hub.register_pending_save(accepted_job_id, dedup_key);
+        },
+    };
 
     const teardown_overlays = (): void => {
         for (const ctrl of active.values()) {
@@ -68,6 +77,8 @@ export function run_content_app(): void {
         }
     };
 
+    job_hub = create_job_outcome_hub({ outcome_cache, in_flight, reconcile });
+
     const apply_directory_gate = async (): Promise<void> => {
         const access = await send_get_directory_access_state_message();
         log.debug("apply_directory_gate: sw", {
@@ -90,15 +101,23 @@ export function run_content_app(): void {
         overlays_enabled = next;
         if (!overlays_enabled) {
             log.info("content overlays disabled: save directory not granted");
+            job_hub.dispose();
+            in_flight.clear();
+            try {
+                await outcome_cache.clear_all();
+            } catch (error: unknown) {
+                log.warn("outcome cache clear failed", { error });
+            }
+            job_hub = create_job_outcome_hub({ outcome_cache, in_flight, reconcile });
             teardown_overlays();
             stop_observer();
             return;
         }
         log.info("content overlays enabled: save directory granted");
         try {
-            await registry.ensure_loaded();
+            await outcome_cache.ensure_loaded();
         } catch (error: unknown) {
-            log.warn("session saved registry load failed", { error });
+            log.warn("outcome cache load failed", { error });
         }
         if (observer === null) {
             observer = subscribe_image_dom_changes(reconcile, observer_debounce_ms);
@@ -129,6 +148,11 @@ export function run_content_app(): void {
         return undefined;
     };
 
+    const on_runtime_message = (message: unknown): boolean | undefined => {
+        job_hub.handle_runtime_message(message);
+        return on_runtime_directory_ping(message);
+    };
+
     const on_visibility_change = (): void => {
         if (document.visibilityState === "visible") {
             log.debug("content: visibility visible → apply_directory_gate");
@@ -137,7 +161,7 @@ export function run_content_app(): void {
     };
 
     browser.storage.onChanged.addListener(on_storage_changed);
-    browser.runtime.onMessage.addListener(on_runtime_directory_ping);
+    browser.runtime.onMessage.addListener(on_runtime_message);
 
     void apply_directory_gate()
         .then(() => {
@@ -147,7 +171,8 @@ export function run_content_app(): void {
                 window.removeEventListener("pagehide", on_page_hide);
                 document.removeEventListener("visibilitychange", on_visibility_change);
                 browser.storage.onChanged.removeListener(on_storage_changed);
-                browser.runtime.onMessage.removeListener(on_runtime_directory_ping);
+                browser.runtime.onMessage.removeListener(on_runtime_message);
+                job_hub.dispose();
                 stop_observer();
                 teardown_overlays();
             };

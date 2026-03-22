@@ -22,7 +22,10 @@ function sanitize_stem(raw: string): string {
     return cleaned.length > 0 ? cleaned : DEFAULT_STEM;
 }
 
-/** Имя файла из URL страницы картинки: сегмент пути + расширение, символы пути санитизированы. */
+/**
+ * Имя файла из URL страницы картинки: сегмент пути + расширение, символы пути санитизированы.
+ * @todo Stage 6 (опционально): учитывать `Content-Type` из ответа `fetch` в SW, если в URL нет валидного ext.
+ */
 export function suggested_name_from_image_url(absolute_url: string): string {
     let parsed: URL;
     try {

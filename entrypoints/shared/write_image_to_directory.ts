@@ -32,7 +32,9 @@ export async function pick_unique_filename(
 
 /**
  * Создаёт файл в каталоге и пишет `blob`.
- * @remarks Имя может отличаться от `suggested_name` после `pick_unique_filename`.
+ * @remarks Если файл с **точным** `suggested_name` уже есть — запись не выполняется
+ * (повторное сохранение того же имени не даёт `name_1.ext`). Иначе имя может отличаться
+ * после `pick_unique_filename`, если занято другое содержимое с тем же basename.
  */
 export async function write_blob_to_directory(
     directory: FileSystemDirectoryHandle,
@@ -44,6 +46,13 @@ export async function write_blob_to_directory(
         bytes: blob.size,
         type: blob.type || "(empty)",
     });
+    try {
+        await directory.getFileHandle(suggested_name, { create: false });
+        log.debug("write_blob_to_directory: already on disk, skip write", { suggested_name });
+        return suggested_name;
+    } catch {
+        /* нет файла с таким именем — создаём */
+    }
     const name = await pick_unique_filename(directory, suggested_name);
     const handle = await directory.getFileHandle(name, { create: true });
     const writable = await handle.createWritable();

@@ -8,15 +8,16 @@ import { create_logger } from "../shared/logger";
 import { IMAGE_SAVER_ROOT_ATTR } from "./constants";
 import { make_job_dedup_key } from "./dedup";
 import { resolve_image_url_from_element } from "./resolve_image_url";
-import type { SessionSavedDedupRegistry } from "./session_saved_keys";
+import type { OutcomeCacheRegistry } from "./outcome_cache";
 
 const log = create_logger("content");
 
 type OverlayVisual = "idle" | "saving" | "saved" | "hidden";
 
 export type OverlayDeps = Readonly<{
-    registry: SessionSavedDedupRegistry;
+    outcome_cache: OutcomeCacheRegistry;
     in_flight: Set<string>;
+    register_pending_save: (accepted_job_id: string, dedup_key: string) => void;
 }>;
 
 function unwrap_target_image(img: HTMLImageElement): void {
@@ -112,7 +113,7 @@ export class ImageOverlayController {
         if (this.button === null || this.wrap === null) {
             return;
         }
-        await this.deps.registry.ensure_loaded();
+        await this.deps.outcome_cache.ensure_loaded();
         const resolved = resolve_image_url_from_element(this.img, globalThis.location.href);
         if (!resolved.ok) {
             this.set_visual("hidden");
@@ -120,7 +121,7 @@ export class ImageOverlayController {
         }
         const suggested_name = suggested_name_from_image_url(resolved.url);
         const key = make_job_dedup_key(resolved.url, suggested_name);
-        if (this.deps.registry.has(key)) {
+        if (this.deps.outcome_cache.has_saved(key)) {
             this.set_visual("saved");
             return;
         }
@@ -210,15 +211,16 @@ export class ImageOverlayController {
         if (this.button === null) {
             return;
         }
-        await this.deps.registry.ensure_loaded();
+        await this.deps.outcome_cache.ensure_loaded();
         const source_page_url = globalThis.location.href;
         const resolved = resolve_image_url_from_element(this.img, source_page_url);
         if (!resolved.ok) {
             return;
         }
         const suggested_name = suggested_name_from_image_url(resolved.url);
+        // `resolved.url` — тот же канонический URL, что в `refresh` / `resolve_image_url` (dedup §6.2).
         const key = make_job_dedup_key(resolved.url, suggested_name);
-        if (this.deps.registry.has(key)) {
+        if (this.deps.outcome_cache.has_saved(key)) {
             return;
         }
         if (this.deps.in_flight.has(key)) {
@@ -227,6 +229,7 @@ export class ImageOverlayController {
 
         this.deps.in_flight.add(key);
         this.set_visual("saving");
+        let wait_for_job_status = false;
         try {
             const job: SaveJob = {
                 job_id: crypto.randomUUID(),
@@ -237,8 +240,8 @@ export class ImageOverlayController {
             };
             const response = await send_queue_save_message(job);
             if (response.ok) {
-                await this.deps.registry.remember(key);
-                this.set_visual("saved");
+                this.deps.register_pending_save(response.data.accepted_job_id, key);
+                wait_for_job_status = true;
             } else {
                 const detail = response.error.message;
                 log.warn("queue_save rejected", { detail });
@@ -257,7 +260,9 @@ export class ImageOverlayController {
                 }, 2500);
             }
         } finally {
-            this.deps.in_flight.delete(key);
+            if (!wait_for_job_status) {
+                this.deps.in_flight.delete(key);
+            }
         }
     }
 }
