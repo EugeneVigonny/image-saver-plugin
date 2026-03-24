@@ -17,6 +17,13 @@
     "format": "prettier . --write",
     "format:check": "prettier . --check",
     "test": "vitest run",
+    "cargo:check": "cargo check --manifest-path native/image-saver-daemon/Cargo.toml",
+    "cargo:fmt": "cargo fmt --manifest-path native/image-saver-daemon/Cargo.toml",
+    "cargo:fmt:check": "cargo fmt --manifest-path native/image-saver-daemon/Cargo.toml -- --check",
+    "cargo:clippy": "cargo clippy --manifest-path native/image-saver-daemon/Cargo.toml --all-targets --all-features -- -D warnings",
+    "cargo:test": "cargo test --manifest-path native/image-saver-daemon/Cargo.toml",
+    "cargo:build": "cargo build --manifest-path native/image-saver-daemon/Cargo.toml",
+    "cargo:run": "cargo run --manifest-path native/image-saver-daemon/Cargo.toml",
     "postinstall": "wxt prepare"
   },
   "devDependencies": {
