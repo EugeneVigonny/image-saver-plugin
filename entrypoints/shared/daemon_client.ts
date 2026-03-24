@@ -5,7 +5,6 @@ const log = create_logger("daemon_client");
 const default_daemon_base_url = "http://127.0.0.1:48321";
 const daemon_base_url =
   (import.meta.env["WXT_DAEMON_BASE_URL"] as string | undefined)?.trim() || default_daemon_base_url;
-const daemon_auth_token_key = "daemon_auth_token";
 
 export type SaveImageOptions = Readonly<{
   max_long_edge?: number;
@@ -38,18 +37,6 @@ function daemon_url(path: string): string {
   return `${trim_trailing_slash(daemon_base_url)}${path}`;
 }
 
-async function get_daemon_auth_token(): Promise<string | null> {
-  const bag = await browser.storage.local.get(daemon_auth_token_key);
-  const raw = bag[daemon_auth_token_key];
-  return typeof raw === "string" && raw.trim().length > 0 ? raw : null;
-}
-
-export async function set_daemon_auth_token(token: string): Promise<void> {
-  await browser.storage.local.set({
-    [daemon_auth_token_key]: token.trim()
-  });
-}
-
 function to_daemon_error(status: number, body: unknown, fallback: string): DaemonError {
   if (typeof body === "object" && body !== null) {
     const row = body as Record<string, unknown>;
@@ -77,11 +64,7 @@ async function parse_json_body(response: Response): Promise<unknown> {
 }
 
 async function build_headers(content_type?: string): Promise<HeadersInit> {
-  const token = await get_daemon_auth_token();
   const headers: Record<string, string> = {};
-  if (token !== null) {
-    headers["Authorization"] = `Bearer ${token}`;
-  }
   if (content_type !== undefined) {
     headers["Content-Type"] = content_type;
   }
@@ -145,7 +128,6 @@ export async function daemon_save_image_multipart(params: {
   blob: Blob;
   options?: SaveImageOptions;
 }): Promise<SaveImageResponse> {
-  const token = await get_daemon_auth_token();
   const form = new FormData();
   form.append(
     "meta",
@@ -156,14 +138,8 @@ export async function daemon_save_image_multipart(params: {
   );
   form.append("file", params.blob, params.file_name);
 
-  const headers: Record<string, string> = {};
-  if (token !== null) {
-    headers["Authorization"] = `Bearer ${token}`;
-  }
-
   const response = await fetch(daemon_url("/v1/images"), {
     method: "POST",
-    headers,
     body: form
   });
   const parsed = await parse_json_body(response);

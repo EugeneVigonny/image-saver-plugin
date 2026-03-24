@@ -2,20 +2,17 @@ import "./style.css";
 import {
   daemon_health,
   daemon_set_save_directory,
-  set_daemon_auth_token,
   type DaemonError
 } from "@/entrypoints/shared/daemon_client";
 import { create_logger } from "@/entrypoints/shared/logger";
 
 const log = create_logger("popup");
-const daemon_auth_token_key = "daemon_auth_token";
 const daemon_save_directory_key = "daemon_save_directory";
 
 type PopupViewModel = Readonly<{
   is_busy: boolean;
   daemon_online: boolean;
   directory_path: string;
-  token_value: string;
   last_error: string | null;
   protocol: number | null;
   version: string | null;
@@ -27,7 +24,6 @@ let view_model: PopupViewModel = {
   is_busy: false,
   daemon_online: false,
   directory_path: "",
-  token_value: "",
   last_error: null,
   protocol: null,
   version: null
@@ -47,17 +43,29 @@ function set_view_model(next: PopupViewModel): void {
 }
 
 function set_busy(is_busy: boolean): void {
-  set_view_model({
+  view_model = {
     ...view_model,
     is_busy
-  });
+  };
+  apply_busy_state();
+}
+
+function apply_busy_state(): void {
+  const path_input = document.querySelector<HTMLInputElement>("#daemon-directory-path");
+  const save_button = document.querySelector<HTMLButtonElement>("#save-settings");
+
+  if (path_input !== null) {
+    path_input.disabled = view_model.is_busy;
+  }
+  if (save_button !== null) {
+    save_button.disabled = view_model.is_busy;
+  }
 }
 
 async function load_local_settings(): Promise<void> {
-  const bag = await browser.storage.local.get([daemon_auth_token_key, daemon_save_directory_key]);
+  const bag = await browser.storage.local.get([daemon_save_directory_key]);
   set_view_model({
     ...view_model,
-    token_value: typeof bag[daemon_auth_token_key] === "string" ? bag[daemon_auth_token_key] : "",
     directory_path:
       typeof bag[daemon_save_directory_key] === "string" ? bag[daemon_save_directory_key] : ""
   });
@@ -90,12 +98,9 @@ async function on_save_settings_click(): Promise<void> {
   }
   set_busy(true);
   try {
-    const token_input = document.querySelector<HTMLInputElement>("#daemon-token");
     const path_input = document.querySelector<HTMLInputElement>("#daemon-directory-path");
-    const token = token_input?.value.trim() ?? "";
     const directory_path = path_input?.value.trim() ?? "";
 
-    await set_daemon_auth_token(token);
     await browser.storage.local.set({
       [daemon_save_directory_key]: directory_path
     });
@@ -106,7 +111,6 @@ async function on_save_settings_click(): Promise<void> {
 
     set_view_model({
       ...view_model,
-      token_value: token,
       directory_path,
       last_error: null
     });
@@ -130,10 +134,6 @@ function render(): void {
             <h1>Image Saver</h1>
             <p>Демон: <strong>${view_model.daemon_online ? "online" : "offline"}</strong></p>
             <p>Версия: <strong>${view_model.version ?? "—"}</strong>, protocol: <strong>${view_model.protocol ?? "—"}</strong></p>
-            <label>
-                <p>Bearer token</p>
-                <input id="daemon-token" value="${view_model.token_value}" ${disabled_attr} />
-            </label>
             <label>
                 <p>Папка сохранения (absolute path)</p>
                 <input id="daemon-directory-path" value="${view_model.directory_path}" ${disabled_attr} />
