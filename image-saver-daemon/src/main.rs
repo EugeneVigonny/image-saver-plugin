@@ -1,18 +1,23 @@
 mod application;
 mod interface;
 
-use std::net::SocketAddr;
+use std::net::{IpAddr, SocketAddr};
 
 use tokio::{net::TcpListener, signal};
 use tracing::{info, warn};
 use tracing_subscriber::{EnvFilter, fmt, layer::SubscriberExt, util::SubscriberInitExt};
+use url::Url;
+
+const DEFAULT_DAEMON_BASE_URL: &str = "http://127.0.0.1:8765";
+const DAEMON_BASE_URL_ENV: &str = "DAEMON_BASE_URL";
 
 #[tokio::main]
 async fn main() -> Result<(), std::io::Error> {
+    load_env();
     init_tracing();
 
     let app = interface::http::routes::build_router();
-    let address = SocketAddr::from(([127, 0, 0, 1], 8765));
+    let address = resolve_bind_address()?;
     let listener = TcpListener::bind(address).await?;
 
     info!(%address, "image-saver-daemon started");
@@ -35,4 +40,38 @@ async fn shutdown_signal() {
     if signal::ctrl_c().await.is_ok() {
         warn!("shutdown signal received");
     }
+}
+
+fn load_env() {
+    let _ = dotenvy::from_filename(".env");
+}
+
+fn resolve_bind_address() -> Result<SocketAddr, std::io::Error> {
+    let base_url =
+        std::env::var(DAEMON_BASE_URL_ENV).unwrap_or_else(|_| DEFAULT_DAEMON_BASE_URL.to_string());
+    let parsed = Url::parse(&base_url)
+        .map_err(|error| invalid_input(format!("invalid {DAEMON_BASE_URL_ENV}: {error}")))?;
+
+    let host = parsed
+        .host_str()
+        .ok_or_else(|| invalid_input(format!("{DAEMON_BASE_URL_ENV} must include host")))?;
+    let ip: IpAddr = host
+        .parse()
+        .map_err(|_| invalid_input(format!("{DAEMON_BASE_URL_ENV} host must be an IP address")))?;
+
+    if !ip.is_loopback() {
+        return Err(invalid_input(format!(
+            "{DAEMON_BASE_URL_ENV} must use loopback address"
+        )));
+    }
+
+    let port = parsed
+        .port_or_known_default()
+        .ok_or_else(|| invalid_input(format!("{DAEMON_BASE_URL_ENV} must include port")))?;
+
+    Ok(SocketAddr::new(ip, port))
+}
+
+fn invalid_input(message: String) -> std::io::Error {
+    std::io::Error::new(std::io::ErrorKind::InvalidInput, message)
 }

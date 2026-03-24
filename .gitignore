@@ -39,6 +39,7 @@ lerna-debug.log*
 .env.development
 .env.test
 .env.production
+image-saver-daemon/.env
 
 # temp directory
 .temp
