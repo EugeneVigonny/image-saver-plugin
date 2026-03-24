@@ -1,6 +1,7 @@
 import plus_icon_url from "../../assets/content/plus-svgrepo-com.svg?url";
 import ok_icon_url from "../../assets/content/ok-svgrepo-com.svg?url";
 import spinner_icon_url from "../../assets/content/spinner-svgrepo-com.svg?url";
+import error_icon_url from "../../assets/content/error-svgrepo-com.svg?url";
 import { suggested_name_from_image_url } from "../shared/naming";
 import { daemon_image_exists, daemon_save_image_multipart } from "../shared/daemon_client";
 import { download_image } from "../shared/download_image";
@@ -12,7 +13,7 @@ import type { OutcomeCacheRegistry } from "./outcome_cache";
 
 const log = create_logger("content");
 
-type OverlayVisual = "idle" | "saving" | "saved" | "hidden";
+type OverlayVisual = "idle" | "saving" | "saved" | "error" | "hidden";
 
 export type OverlayDeps = Readonly<{
   outcome_cache: OutcomeCacheRegistry;
@@ -70,8 +71,8 @@ export class ImageOverlayController {
   private icon_plus: HTMLImageElement | null = null;
   private icon_ok: HTMLImageElement | null = null;
   private icon_spinner: HTMLImageElement | null = null;
+  private icon_error: HTMLImageElement | null = null;
   private bound_click: (ev: MouseEvent) => void;
-  private error_clear_timer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(img: HTMLImageElement, deps: OverlayDeps) {
     this.img = img;
@@ -102,8 +103,9 @@ export class ImageOverlayController {
       "Сохранение…",
       "image-saver-plugin__spinner"
     );
+    this.icon_error = create_icon_layer(error_icon_url, "Ошибка сохранения");
 
-    btn.append(this.icon_plus, this.icon_ok, this.icon_spinner);
+    btn.append(this.icon_plus, this.icon_ok, this.icon_spinner, this.icon_error);
     btn.addEventListener("click", this.bound_click);
     this.wrap.appendChild(btn);
     this.button = btn;
@@ -132,14 +134,24 @@ export class ImageOverlayController {
       this.set_visual("saving");
       return;
     }
-    this.set_visual("idle");
+    this.set_visual("saving");
+    try {
+      const already_exists = await daemon_image_exists(suggested_name);
+      if (already_exists) {
+        await this.deps.outcome_cache.set_saved(key);
+        this.set_visual("saved");
+        return;
+      }
+      this.set_visual("idle");
+    } catch (error: unknown) {
+      const detail = error instanceof Error ? error.message : String(error);
+      this.button.title = detail;
+      this.button.setAttribute("aria-label", `Ошибка проверки: ${detail}`);
+      this.set_visual("error");
+    }
   }
 
   dispose(): void {
-    if (this.error_clear_timer !== null) {
-      clearTimeout(this.error_clear_timer);
-      this.error_clear_timer = null;
-    }
     if (this.button !== null) {
       this.button.removeEventListener("click", this.bound_click);
       this.button.remove();
@@ -148,12 +160,13 @@ export class ImageOverlayController {
     this.icon_plus = null;
     this.icon_ok = null;
     this.icon_spinner = null;
+    this.icon_error = null;
     unwrap_target_image(this.img);
     this.wrap = null;
   }
 
-  private set_visible_layer(which: "plus" | "ok" | "spinner" | "none"): void {
-    const layers = [this.icon_plus, this.icon_ok, this.icon_spinner] as const;
+  private set_visible_layer(which: "plus" | "ok" | "spinner" | "error" | "none"): void {
+    const layers = [this.icon_plus, this.icon_ok, this.icon_spinner, this.icon_error] as const;
     for (const layer of layers) {
       if (layer === null) {
         continue;
@@ -164,6 +177,7 @@ export class ImageOverlayController {
       plus: this.icon_plus,
       ok: this.icon_ok,
       spinner: this.icon_spinner,
+      error: this.icon_error,
       none: null
     } as const;
     const target = map[which];
@@ -183,6 +197,8 @@ export class ImageOverlayController {
     );
     this.button.classList.remove("image-saver-plugin__btn--error");
     this.button.disabled = false;
+    this.button.title = "";
+    this.button.setAttribute("aria-label", "Сохранить изображение");
 
     if (state === "hidden") {
       this.wrap.classList.add("image-saver-plugin__wrap--unsupported");
@@ -204,6 +220,11 @@ export class ImageOverlayController {
       this.wrap.classList.add("image-saver-plugin__wrap--saved");
       this.set_visible_layer("ok");
       this.button.disabled = true;
+      return;
+    }
+    if (state === "error") {
+      this.button.classList.add("image-saver-plugin__btn--error");
+      this.set_visible_layer("error");
     }
   }
 
@@ -252,19 +273,9 @@ export class ImageOverlayController {
       const detail = error instanceof Error ? error.message : String(error);
       log.warn("save rejected", { detail, source_page_url });
       this.button.title = detail;
-      this.button.classList.add("image-saver-plugin__btn--error");
-      this.set_visual("idle");
+      this.button.setAttribute("aria-label", `Ошибка сохранения: ${detail}`);
+      this.set_visual("error");
       await this.deps.outcome_cache.set_failed(key, detail);
-      if (this.error_clear_timer !== null) {
-        clearTimeout(this.error_clear_timer);
-      }
-      this.error_clear_timer = setTimeout(() => {
-        this.error_clear_timer = null;
-        if (this.button !== null) {
-          this.button.title = "";
-          this.button.classList.remove("image-saver-plugin__btn--error");
-        }
-      }, 2500);
     } finally {
       this.deps.in_flight.delete(key);
     }

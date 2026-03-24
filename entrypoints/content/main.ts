@@ -9,6 +9,8 @@ import { query_image_elements } from "./query_images";
 const log = create_logger("content");
 
 const observer_debounce_ms = 100;
+const daemon_gate_retry_ms = 3000;
+const daemon_save_directory_key = "daemon_save_directory";
 
 /**
  * Оверлеи на изображениях при `permission_state === "granted"` для папки сохранения.
@@ -21,6 +23,7 @@ export function run_content_app(): void {
 
   let overlays_enabled = false;
   let observer: Readonly<{ disconnect(): void }> | null = null;
+  let gate_retry_timer: ReturnType<typeof setTimeout> | null = null;
   const deps = { outcome_cache, in_flight };
 
   const teardown_overlays = (): void => {
@@ -35,6 +38,23 @@ export function run_content_app(): void {
       observer.disconnect();
       observer = null;
     }
+  };
+
+  const clear_gate_retry = (): void => {
+    if (gate_retry_timer !== null) {
+      clearTimeout(gate_retry_timer);
+      gate_retry_timer = null;
+    }
+  };
+
+  const schedule_gate_retry = (): void => {
+    if (gate_retry_timer !== null) {
+      return;
+    }
+    gate_retry_timer = setTimeout(() => {
+      gate_retry_timer = null;
+      void apply_daemon_gate();
+    }, daemon_gate_retry_ms);
   };
 
   const reconcile = (): void => {
@@ -60,11 +80,22 @@ export function run_content_app(): void {
     }
   };
 
+  const has_configured_directory = async (): Promise<boolean> => {
+    const bag = await browser.storage.local.get([daemon_save_directory_key]);
+    const raw = bag[daemon_save_directory_key];
+    return typeof raw === "string" && raw.trim().length > 0;
+  };
+
   const apply_daemon_gate = async (): Promise<void> => {
     let next = false;
     try {
-      await daemon_health();
-      next = true;
+      const has_directory = await has_configured_directory();
+      if (!has_directory) {
+        next = false;
+      } else {
+        await daemon_health();
+        next = true;
+      }
     } catch (error) {
       log.warn("apply_daemon_gate: daemon is unavailable", { error });
       next = false;
@@ -77,7 +108,14 @@ export function run_content_app(): void {
     }
     overlays_enabled = next;
     if (!overlays_enabled) {
-      log.info("content overlays disabled: daemon unavailable");
+      const has_directory = await has_configured_directory();
+      if (!has_directory) {
+        clear_gate_retry();
+        log.info("content overlays disabled: save directory is not configured");
+      } else {
+        log.info("content overlays disabled: daemon unavailable");
+        schedule_gate_retry();
+      }
       in_flight.clear();
       try {
         await outcome_cache.clear_all();
@@ -88,6 +126,7 @@ export function run_content_app(): void {
       stop_observer();
       return;
     }
+    clear_gate_retry();
     log.info("content overlays enabled: daemon available");
     try {
       await outcome_cache.ensure_loaded();
@@ -108,13 +147,26 @@ export function run_content_app(): void {
     }
   };
 
+  const on_storage_changed = (
+    changes: Record<string, { oldValue?: unknown; newValue?: unknown }>,
+    area: string
+  ): void => {
+    if (area !== "local" || changes[daemon_save_directory_key] === undefined) {
+      return;
+    }
+    void apply_daemon_gate();
+  };
+
   void apply_daemon_gate()
     .then(() => {
       document.addEventListener("visibilitychange", on_visibility_change);
+      browser.storage.onChanged.addListener(on_storage_changed);
 
       const on_page_hide = (): void => {
         window.removeEventListener("pagehide", on_page_hide);
         document.removeEventListener("visibilitychange", on_visibility_change);
+        browser.storage.onChanged.removeListener(on_storage_changed);
+        clear_gate_retry();
         stop_observer();
         teardown_overlays();
       };

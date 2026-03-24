@@ -28,6 +28,7 @@ export type SaveImageResponse = Readonly<{
 }>;
 
 type DaemonJsonOk<T> = Readonly<{ ok: true } & T>;
+const daemon_health_timeout_ms = 2500;
 
 function trim_trailing_slash(value: string): string {
   return value.endsWith("/") ? value.slice(0, -1) : value;
@@ -74,17 +75,26 @@ async function build_headers(content_type?: string): Promise<HeadersInit> {
 async function request_json<T>(
   path: string,
   method: "GET" | "PUT",
-  body?: unknown
+  body?: unknown,
+  signal?: AbortSignal
 ): Promise<DaemonJsonOk<T>> {
   const headers = await build_headers(body === undefined ? undefined : "application/json");
   const init: RequestInit = {
     method,
     headers
   };
+  if (signal !== undefined) {
+    init.signal = signal;
+  }
   if (body !== undefined) {
     init.body = JSON.stringify(body);
   }
-  const response = await fetch(daemon_url(path), init);
+  let response: Response;
+  try {
+    response = await fetch(daemon_url(path), init);
+  } catch (error: unknown) {
+    throw to_transport_error(error, path);
+  }
   const parsed = await parse_json_body(response);
   if (!response.ok) {
     throw to_daemon_error(response.status, parsed, `Daemon request failed: ${path}`);
@@ -103,11 +113,22 @@ async function request_json<T>(
 }
 
 export async function daemon_health(): Promise<DaemonHealth> {
-  const response = await request_json<{ version: string; protocol: number }>("/v1/health", "GET");
-  return {
-    version: response.version,
-    protocol: response.protocol
-  };
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), daemon_health_timeout_ms);
+  try {
+    const response = await request_json<{ version: string; protocol: number }>(
+      "/v1/health",
+      "GET",
+      undefined,
+      controller.signal
+    );
+    return {
+      version: response.version,
+      protocol: response.protocol
+    };
+  } finally {
+    clearTimeout(timeout);
+  }
 }
 
 export async function daemon_set_save_directory(path: string): Promise<string> {
@@ -138,10 +159,15 @@ export async function daemon_save_image_multipart(params: {
   );
   form.append("file", params.blob, params.file_name);
 
-  const response = await fetch(daemon_url("/v1/images"), {
-    method: "POST",
-    body: form
-  });
+  let response: Response;
+  try {
+    response = await fetch(daemon_url("/v1/images"), {
+      method: "POST",
+      body: form
+    });
+  } catch (error: unknown) {
+    throw to_transport_error(error, "/v1/images");
+  }
   const parsed = await parse_json_body(response);
   if (!response.ok) {
     throw to_daemon_error(response.status, parsed, "save_image failed");
@@ -171,5 +197,27 @@ export async function daemon_save_image_multipart(params: {
   return {
     written_path: row["written_path"],
     skipped: row["skipped"]
+  };
+}
+
+function to_transport_error(error: unknown, path: string): DaemonError {
+  if (error instanceof DOMException && error.name === "AbortError") {
+    return {
+      status: 0,
+      code: "E_TIMEOUT",
+      message: `Daemon request timeout: ${path}`
+    };
+  }
+  if (error instanceof TypeError) {
+    return {
+      status: 0,
+      code: "E_NETWORK",
+      message: `Network error while calling daemon: ${path}`
+    };
+  }
+  return {
+    status: 0,
+    code: "E_NETWORK",
+    message: error instanceof Error ? error.message : `Daemon transport error: ${path}`
   };
 }

@@ -44,6 +44,10 @@
   display: flex;
 }
 
+.image-saver-plugin__wrap .image-saver-plugin__btn.image-saver-plugin__btn--error {
+  display: flex;
+}
+
 .image-saver-plugin__btn:disabled {
   cursor: default;
   opacity: 0.9;
