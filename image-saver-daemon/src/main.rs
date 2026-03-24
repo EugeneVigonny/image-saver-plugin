@@ -8,6 +8,7 @@ use std::{
 };
 
 use tokio::{net::TcpListener, signal, sync::RwLock};
+use tower_http::cors::{Any, CorsLayer};
 use tracing::{info, warn};
 use tracing_subscriber::{EnvFilter, fmt, layer::SubscriberExt, util::SubscriberInitExt};
 use url::Url;
@@ -25,7 +26,11 @@ async fn main() -> Result<(), std::io::Error> {
     let app_state = AppState {
         save_directory: Arc::new(RwLock::new(None::<PathBuf>)),
     };
-    let app = interface::http::routes::build_router(app_state);
+    let cors = CorsLayer::new()
+        .allow_origin(Any)
+        .allow_methods(Any)
+        .allow_headers(Any);
+    let app = interface::http::routes::build_router(app_state).layer(cors);
     let address = resolve_bind_address()?;
     let listener = TcpListener::bind(address).await?;
 

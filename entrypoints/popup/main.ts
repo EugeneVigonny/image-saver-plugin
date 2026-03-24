@@ -147,8 +147,15 @@ async function on_save_settings_click(): Promise<void> {
 
 function render(): void {
   const disabled_attr = view_model.is_busy ? "disabled" : "";
+  const can_show_ready_overlay =
+    view_model.daemon_online && view_model.directory_path.trim().length > 0;
   app.innerHTML = `
         <main class="popup-root">
+            ${
+              can_show_ready_overlay
+                ? `<div class="popup-ready-overlay">Готово к сохранению</div>`
+                : ""
+            }
             <h1>Image Saver</h1>
             <p>Демон: <strong>${view_model.daemon_online ? "online" : "offline"}</strong></p>
             <p>Версия: <strong>${view_model.version ?? "—"}</strong>, protocol: <strong>${view_model.protocol ?? "—"}</strong></p>
