@@ -13,15 +13,6 @@
     "allowUnreachableCode": false,
     "allowUnusedLabels": false
   },
-  "include": [
-    ".wxt/wxt.d.ts",
-    "entrypoints/**/*.ts",
-    "components/**/*.ts",
-    "wxt.config.ts"
-  ],
-  "exclude": [
-    "node_modules",
-    ".output",
-    "**/*.test.ts"
-  ]
+  "include": [".wxt/wxt.d.ts", "entrypoints/**/*.ts", "components/**/*.ts", "wxt.config.ts"],
+  "exclude": ["node_modules", ".output", "**/*.test.ts"]
 }
