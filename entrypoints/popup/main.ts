@@ -37,6 +37,16 @@ function daemon_error_to_text(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
+function is_absolute_path(path: string): boolean {
+  if (path.length === 0) {
+    return false;
+  }
+  const windows_drive = /^[A-Za-z]:[\\/]/.test(path);
+  const windows_unc = /^\\\\[^\\]+\\[^\\]+/.test(path);
+  const unix_absolute = path.startsWith("/");
+  return windows_drive || windows_unc || unix_absolute;
+}
+
 function set_view_model(next: PopupViewModel): void {
   view_model = next;
   render();
@@ -100,6 +110,14 @@ async function on_save_settings_click(): Promise<void> {
   try {
     const path_input = document.querySelector<HTMLInputElement>("#daemon-directory-path");
     const directory_path = path_input?.value.trim() ?? "";
+
+    if (directory_path.length > 0 && !is_absolute_path(directory_path)) {
+      set_view_model({
+        ...view_model,
+        last_error: "Путь должен быть абсолютным. Пример: C:\\Users\\eugen\\Downloads"
+      });
+      return;
+    }
 
     await browser.storage.local.set({
       [daemon_save_directory_key]: directory_path
