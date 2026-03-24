@@ -1,12 +1,18 @@
 mod application;
 mod interface;
 
-use std::net::{IpAddr, SocketAddr};
+use std::{
+    net::{IpAddr, SocketAddr},
+    path::PathBuf,
+    sync::Arc,
+};
 
-use tokio::{net::TcpListener, signal};
+use tokio::{net::TcpListener, signal, sync::RwLock};
 use tracing::{info, warn};
 use tracing_subscriber::{EnvFilter, fmt, layer::SubscriberExt, util::SubscriberInitExt};
 use url::Url;
+
+use crate::interface::http::routes::AppState;
 
 const DEFAULT_DAEMON_BASE_URL: &str = "http://127.0.0.1:8765";
 const DAEMON_BASE_URL_ENV: &str = "DAEMON_BASE_URL";
@@ -16,7 +22,10 @@ async fn main() -> Result<(), std::io::Error> {
     load_env();
     init_tracing();
 
-    let app = interface::http::routes::build_router();
+    let app_state = AppState {
+        save_directory: Arc::new(RwLock::new(None::<PathBuf>)),
+    };
+    let app = interface::http::routes::build_router(app_state);
     let address = resolve_bind_address()?;
     let listener = TcpListener::bind(address).await?;
 
