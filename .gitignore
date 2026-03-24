@@ -48,3 +48,8 @@ lerna-debug.log*
 .cursor/*
 !.cursor/rules/
 !.cursor/rules/**
+
+# Rust
+target/
+**/target/
+**/*.rs.bk
