@@ -1,53 +1,53 @@
 import { is_sample_placeholder_image_element, is_svg_image_element } from "./resolve_image_url";
 
 function document_base_href(root: Document | Element): string {
-    if (root instanceof Document) {
-        return root.URL || root.documentURI || "";
-    }
-    return (
-        root.ownerDocument?.URL ??
-        root.ownerDocument?.documentURI ??
-        (typeof globalThis.location?.href === "string" ? globalThis.location.href : "")
-    );
+  if (root instanceof Document) {
+    return root.URL || root.documentURI || "";
+  }
+  return (
+    root.ownerDocument?.URL ??
+    root.ownerDocument?.documentURI ??
+    (typeof globalThis.location?.href === "string" ? globalThis.location.href : "")
+  );
 }
 
 /** `img` внутри кнопки с иконками `+`/`✓`/спиннер — не целевые картинки страницы. */
 function is_overlay_control_image(img: HTMLImageElement): boolean {
-    return img.closest(".image-saver-plugin__btn") !== null;
+  return img.closest(".image-saver-plugin__btn") !== null;
 }
 
 /** Трекинг-пиксели и пустые превью. */
 function is_likely_tracking_pixel(img: HTMLImageElement): boolean {
-    const w = img.naturalWidth > 0 ? img.naturalWidth : img.width;
-    const h = img.naturalHeight > 0 ? img.naturalHeight : img.height;
-    return w <= 1 && h <= 1;
+  const w = img.naturalWidth > 0 ? img.naturalWidth : img.width;
+  const h = img.naturalHeight > 0 ? img.naturalHeight : img.height;
+  return w <= 1 && h <= 1;
 }
 
 /**
  * Сканирует `img` под `root`, исключая оверлей расширения, микро-изображения, SVG и URL с подстрокой `sample`.
  */
 export function query_image_elements(root: Document | Element): HTMLImageElement[] {
-    const base_href = document_base_href(root);
-    const base_for_resolve = base_href.length > 0 ? base_href : globalThis.location.href;
-    const nodes = root.querySelectorAll("img");
-    const out: HTMLImageElement[] = [];
-    for (const node of nodes) {
-        if (!(node instanceof HTMLImageElement)) {
-            continue;
-        }
-        if (is_overlay_control_image(node)) {
-            continue;
-        }
-        if (is_likely_tracking_pixel(node)) {
-            continue;
-        }
-        if (is_sample_placeholder_image_element(node, base_for_resolve)) {
-            continue;
-        }
-        if (is_svg_image_element(node, base_for_resolve)) {
-            continue;
-        }
-        out.push(node);
+  const base_href = document_base_href(root);
+  const base_for_resolve = base_href.length > 0 ? base_href : globalThis.location.href;
+  const nodes = root.querySelectorAll("img");
+  const out: HTMLImageElement[] = [];
+  for (const node of nodes) {
+    if (!(node instanceof HTMLImageElement)) {
+      continue;
     }
-    return out;
+    if (is_overlay_control_image(node)) {
+      continue;
+    }
+    if (is_likely_tracking_pixel(node)) {
+      continue;
+    }
+    if (is_sample_placeholder_image_element(node, base_for_resolve)) {
+      continue;
+    }
+    if (is_svg_image_element(node, base_for_resolve)) {
+      continue;
+    }
+    out.push(node);
+  }
+  return out;
 }

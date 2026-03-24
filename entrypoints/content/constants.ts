@@ -9,9 +9,3 @@ export const OUTCOME_CACHE_TTL_MS = 3_600_000;
 
 /** Макс. число записей в outcome cache. */
 export const OUTCOME_CACHE_CAP = 2000;
-
-/**
- * Таймаут ожидания терминального `job_status` для сброса спиннера (мс).
- * Исход job всё ещё обработается при позднем сообщении.
- */
-export const JOB_UI_TIMEOUT_MS = 120_000;
