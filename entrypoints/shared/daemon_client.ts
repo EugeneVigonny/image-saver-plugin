@@ -2,7 +2,7 @@ import { create_logger } from "./logger";
 
 const log = create_logger("daemon_client");
 
-const default_daemon_base_url = "http://127.0.0.1:48321";
+const default_daemon_base_url = "http://127.0.0.1:8765";
 const daemon_base_url =
   (import.meta.env["WXT_DAEMON_BASE_URL"] as string | undefined)?.trim() || default_daemon_base_url;
 
