@@ -2,7 +2,7 @@ use std::{path::PathBuf, sync::Arc};
 
 use axum::{
     Json, Router,
-    extract::State,
+    extract::{Query, State},
     http::StatusCode,
     routing::{get, put},
 };
@@ -11,8 +11,9 @@ use tracing::{error, info};
 
 use crate::application::{
     commands::set_save_directory::{SetSaveDirectoryError, set_save_directory},
-    dto::{ErrorResponse, SetSaveDirectoryRequest, SetSaveDirectoryResponse},
+    dto::{ErrorResponse, ImageExistsResponse, SetSaveDirectoryRequest, SetSaveDirectoryResponse},
     queries::health::{HealthResponse, health_response},
+    queries::image_exists::{ImageExistsError, image_exists},
 };
 
 #[derive(Debug, Clone)]
@@ -23,6 +24,7 @@ pub struct AppState {
 pub fn build_router(state: AppState) -> Router {
     Router::new()
         .route("/v1/health", get(health_handler))
+        .route("/v1/images/exists", get(image_exists_handler))
         .route("/v1/save-directory", put(set_save_directory_handler))
         .with_state(state)
 }
@@ -76,6 +78,50 @@ async fn set_save_directory_handler(
         }
         Err(SetSaveDirectoryError::Io(message)) => {
             error!(reason = %message, "save directory io validation failed");
+            let response = ErrorResponse::new("E_IO", message);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!(response)),
+            )
+        }
+    }
+}
+
+#[derive(Debug, serde::Deserialize)]
+struct ImageExistsQuery {
+    file_name: String,
+}
+
+async fn image_exists_handler(
+    State(state): State<AppState>,
+    Query(query): Query<ImageExistsQuery>,
+) -> (StatusCode, Json<serde_json::Value>) {
+    info!(
+        endpoint = "/v1/images/exists",
+        method = "GET",
+        "image exists check called"
+    );
+
+    let save_dir = {
+        let save_dir_guard = state.save_directory.read().await;
+        save_dir_guard.clone()
+    };
+    match image_exists(save_dir.as_deref(), &query.file_name) {
+        Ok(exists) => {
+            let response = ImageExistsResponse { ok: true, exists };
+            (StatusCode::OK, Json(serde_json::json!(response)))
+        }
+        Err(ImageExistsError::NotConfigured) => {
+            let response =
+                ErrorResponse::new("E_NOT_CONFIGURED", "save directory is not configured");
+            (StatusCode::BAD_REQUEST, Json(serde_json::json!(response)))
+        }
+        Err(ImageExistsError::InvalidInput(message)) => {
+            let response = ErrorResponse::new("E_INVALID_INPUT", message);
+            (StatusCode::BAD_REQUEST, Json(serde_json::json!(response)))
+        }
+        Err(ImageExistsError::Io(message)) => {
+            error!(reason = %message, "image exists io check failed");
             let response = ErrorResponse::new("E_IO", message);
             (
                 StatusCode::INTERNAL_SERVER_ERROR,
@@ -218,5 +264,94 @@ mod tests {
 
         let guard = state.save_directory.read().await;
         assert_eq!(guard.clone(), Some(expected));
+    }
+
+    #[tokio::test]
+    async fn image_exists_returns_not_configured_when_directory_is_missing() {
+        let app = build_router(AppState {
+            save_directory: Arc::new(RwLock::new(None)),
+        });
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("GET")
+                    .uri("/v1/images/exists?file_name=test.jpg")
+                    .body(Body::empty())
+                    .expect("request builder must be valid"),
+            )
+            .await
+            .expect("router must respond");
+
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        let bytes = to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("body must be readable");
+        let json: serde_json::Value =
+            serde_json::from_slice(&bytes).expect("response must be valid json");
+        assert_eq!(
+            json.get("code").and_then(serde_json::Value::as_str),
+            Some("E_NOT_CONFIGURED")
+        );
+    }
+
+    #[tokio::test]
+    async fn image_exists_returns_false_for_missing_file() {
+        let state = AppState {
+            save_directory: Arc::new(RwLock::new(Some(std::env::temp_dir()))),
+        };
+        let app = build_router(state);
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("GET")
+                    .uri("/v1/images/exists?file_name=missing_router_test_file.jpg")
+                    .body(Body::empty())
+                    .expect("request builder must be valid"),
+            )
+            .await
+            .expect("router must respond");
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let bytes = to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("body must be readable");
+        let json: serde_json::Value =
+            serde_json::from_slice(&bytes).expect("response must be valid json");
+        assert_eq!(
+            json.get("exists").and_then(serde_json::Value::as_bool),
+            Some(false)
+        );
+    }
+
+    #[tokio::test]
+    async fn image_exists_returns_invalid_input_for_bad_filename() {
+        let state = AppState {
+            save_directory: Arc::new(RwLock::new(Some(std::env::temp_dir()))),
+        };
+        let app = build_router(state);
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("GET")
+                    .uri("/v1/images/exists?file_name=..%2Fhack.jpg")
+                    .body(Body::empty())
+                    .expect("request builder must be valid"),
+            )
+            .await
+            .expect("router must respond");
+
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        let bytes = to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("body must be readable");
+        let json: serde_json::Value =
+            serde_json::from_slice(&bytes).expect("response must be valid json");
+        assert_eq!(
+            json.get("code").and_then(serde_json::Value::as_str),
+            Some("E_INVALID_INPUT")
+        );
     }
 }

@@ -12,6 +12,12 @@ pub struct SetSaveDirectoryResponse {
 }
 
 #[derive(Debug, Serialize)]
+pub struct ImageExistsResponse {
+    pub ok: bool,
+    pub exists: bool,
+}
+
+#[derive(Debug, Serialize)]
 pub struct ErrorResponse {
     pub ok: bool,
     pub code: String,
