@@ -20,6 +20,16 @@ export type OverlayDeps = Readonly<{
   in_flight: Set<string>;
 }>;
 
+function error_to_text(error: unknown): string {
+  if (typeof error === "object" && error !== null && "message" in error) {
+    const row = error as { message?: unknown; code?: unknown };
+    const message = typeof row.message === "string" ? row.message : "Unknown error";
+    const code = typeof row.code === "string" ? row.code : "";
+    return code.length > 0 ? `${message} (${code})` : message;
+  }
+  return error instanceof Error ? error.message : String(error);
+}
+
 function unwrap_target_image(img: HTMLImageElement): void {
   const wrap = img.parentElement;
   if (wrap === null || wrap.getAttribute(IMAGE_SAVER_ROOT_ATTR) === null) {
@@ -73,6 +83,7 @@ export class ImageOverlayController {
   private icon_spinner: HTMLImageElement | null = null;
   private icon_error: HTMLImageElement | null = null;
   private bound_click: (ev: MouseEvent) => void;
+  private visual_state: OverlayVisual = "hidden";
 
   constructor(img: HTMLImageElement, deps: OverlayDeps) {
     this.img = img;
@@ -144,7 +155,7 @@ export class ImageOverlayController {
       }
       this.set_visual("idle");
     } catch (error: unknown) {
-      const detail = error instanceof Error ? error.message : String(error);
+      const detail = error_to_text(error);
       this.button.title = detail;
       this.button.setAttribute("aria-label", `Ошибка проверки: ${detail}`);
       this.set_visual("error");
@@ -190,6 +201,7 @@ export class ImageOverlayController {
     if (this.button === null || this.wrap === null) {
       return;
     }
+    this.visual_state = state;
     this.wrap.classList.remove(
       "image-saver-plugin__wrap--saved",
       "image-saver-plugin__wrap--busy",
@@ -197,8 +209,11 @@ export class ImageOverlayController {
     );
     this.button.classList.remove("image-saver-plugin__btn--error");
     this.button.disabled = false;
-    this.button.title = "";
-    this.button.setAttribute("aria-label", "Сохранить изображение");
+    this.button.removeAttribute("aria-disabled");
+    if (state !== "error") {
+      this.button.title = "";
+      this.button.setAttribute("aria-label", "Сохранить изображение");
+    }
 
     if (state === "hidden") {
       this.wrap.classList.add("image-saver-plugin__wrap--unsupported");
@@ -225,6 +240,7 @@ export class ImageOverlayController {
     if (state === "error") {
       this.button.classList.add("image-saver-plugin__btn--error");
       this.set_visible_layer("error");
+      this.button.setAttribute("aria-disabled", "true");
     }
   }
 
@@ -233,6 +249,9 @@ export class ImageOverlayController {
    */
   private async on_click(): Promise<void> {
     if (this.button === null) {
+      return;
+    }
+    if (this.visual_state === "error") {
       return;
     }
     await this.deps.outcome_cache.ensure_loaded();
@@ -270,8 +289,12 @@ export class ImageOverlayController {
       this.set_visual("saved");
       return;
     } catch (error) {
-      const detail = error instanceof Error ? error.message : String(error);
-      log.warn("save rejected", { detail, source_page_url });
+      const detail = error_to_text(error);
+      log.warn("save rejected", {
+        detail,
+        source_page_url,
+        error
+      });
       this.button.title = detail;
       this.button.setAttribute("aria-label", `Ошибка сохранения: ${detail}`);
       this.set_visual("error");

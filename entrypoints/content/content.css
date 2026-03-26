@@ -55,6 +55,7 @@
 
 .image-saver-plugin__btn.image-saver-plugin__btn--error {
   outline: 4px solid #f44336;
+  cursor: default;
 }
 
 /**
