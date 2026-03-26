@@ -17,6 +17,18 @@ pub struct ImageExistsResponse {
     pub exists: bool,
 }
 
+#[derive(Debug, Deserialize)]
+pub struct UploadMeta {
+    pub file_name: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct SaveImageResponse {
+    pub ok: bool,
+    pub written_path: String,
+    pub skipped: bool,
+}
+
 #[derive(Debug, Serialize)]
 pub struct ErrorResponse {
     pub ok: bool,
