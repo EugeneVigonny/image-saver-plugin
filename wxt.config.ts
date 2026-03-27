@@ -20,6 +20,19 @@ export default defineConfig({
     name: "Image Saver Plugin",
     version: "1.0.0",
     description: "A plugin that saves images to the pc folder",
+    icons: {
+      16: "icon/16.png",
+      32: "icon/32.png",
+      48: "icon/48.png",
+      128: "icon/128.png"
+    },
+    action: {
+      default_icon: {
+        16: "icon/16.png",
+        32: "icon/32.png",
+        48: "icon/48.png"
+      }
+    },
     author: {
       email: "eugene.vigonny@yandex.ru"
     },
