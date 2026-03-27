@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 
 #[derive(Debug, Deserialize)]
 pub struct SetSaveDirectoryRequest {
@@ -27,6 +28,17 @@ pub struct ImageExistsResponse {
 pub struct FindImageByNameResponse {
     pub ok: bool,
     pub result: Vec<String>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct FindBatchRequest {
+    pub names: Vec<String>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct FindBatchResponse {
+    pub ok: bool,
+    pub result: HashMap<String, Vec<String>>,
 }
 
 #[derive(Debug, Deserialize)]

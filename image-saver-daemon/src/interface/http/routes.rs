@@ -20,6 +20,10 @@ pub fn build_router(state: AppState) -> Router {
         .route("/v1/health", get(handlers::health_handler))
         .route("/v1/images/exists", get(handlers::image_exists_handler))
         .route("/v1/images/find", get(handlers::find_image_by_name_handler))
+        .route(
+            "/v1/images/find-batch",
+            post(handlers::find_images_batch_handler),
+        )
         .route("/v1/images", post(handlers::save_image_handler))
         .route(
             "/v1/save-directory",
@@ -501,6 +505,112 @@ mod tests {
                 "04df1032d561b14c714fd530a05908de.jpg",
                 "04df1032d561b14c714fd530a05908de.png"
             ]))
+        );
+
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[tokio::test]
+    async fn find_batch_returns_not_configured_when_directory_is_missing() {
+        let app = build_router(AppState {
+            save_directory: Arc::new(RwLock::new(None)),
+        });
+        let body = serde_json::json!({ "names": ["abc"] }).to_string();
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/v1/images/find-batch")
+                    .header("content-type", "application/json")
+                    .body(Body::from(body))
+                    .expect("request builder must be valid"),
+            )
+            .await
+            .expect("router must respond");
+
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        let bytes = to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("body must be readable");
+        let json: serde_json::Value =
+            serde_json::from_slice(&bytes).expect("response must be valid json");
+        assert_eq!(
+            json.get("code").and_then(serde_json::Value::as_str),
+            Some("E_NOT_CONFIGURED")
+        );
+    }
+
+    #[tokio::test]
+    async fn find_batch_returns_invalid_input_for_bad_name() {
+        let app = build_router(AppState {
+            save_directory: Arc::new(RwLock::new(Some(std::env::temp_dir()))),
+        });
+        let body = serde_json::json!({ "names": ["..\\hack"] }).to_string();
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/v1/images/find-batch")
+                    .header("content-type", "application/json")
+                    .body(Body::from(body))
+                    .expect("request builder must be valid"),
+            )
+            .await
+            .expect("router must respond");
+
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        let bytes = to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("body must be readable");
+        let json: serde_json::Value =
+            serde_json::from_slice(&bytes).expect("response must be valid json");
+        assert_eq!(
+            json.get("code").and_then(serde_json::Value::as_str),
+            Some("E_INVALID_INPUT")
+        );
+    }
+
+    #[tokio::test]
+    async fn find_batch_returns_mixed_hits_and_misses() {
+        let dir = std::env::temp_dir().join("image-saver-router-find-batch-mixed");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("must create test dir");
+        std::fs::write(dir.join("hash_a.jpg"), b"a").expect("must create file");
+        std::fs::write(dir.join("hash_a.png"), b"b").expect("must create file");
+        std::fs::write(dir.join("hash_b.webp"), b"c").expect("must create file");
+
+        let app = build_router(AppState {
+            save_directory: Arc::new(RwLock::new(Some(dir.clone()))),
+        });
+        let body = serde_json::json!({ "names": ["hash_a", "missing", "hash_b"] }).to_string();
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/v1/images/find-batch")
+                    .header("content-type", "application/json")
+                    .body(Body::from(body))
+                    .expect("request builder must be valid"),
+            )
+            .await
+            .expect("router must respond");
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let bytes = to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("body must be readable");
+        let json: serde_json::Value =
+            serde_json::from_slice(&bytes).expect("response must be valid json");
+        assert_eq!(
+            json.get("result"),
+            Some(&serde_json::json!({
+                "hash_a": ["hash_a.jpg", "hash_a.png"],
+                "missing": [],
+                "hash_b": ["hash_b.webp"]
+            }))
         );
 
         let _ = std::fs::remove_dir_all(dir);
