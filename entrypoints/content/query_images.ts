@@ -16,6 +16,10 @@ function is_overlay_control_image(img: HTMLImageElement): boolean {
   return img.closest(".image-saver-plugin__btn") !== null;
 }
 
+function is_overlay_indicator_image(img: HTMLImageElement): boolean {
+  return img.closest(".image-saver-plugin__enabled-indicator") !== null;
+}
+
 /** Трекинг-пиксели и пустые превью. */
 function is_likely_tracking_pixel(img: HTMLImageElement): boolean {
   const w = img.naturalWidth > 0 ? img.naturalWidth : img.width;
@@ -36,6 +40,9 @@ export function query_image_elements(root: Document | Element): HTMLImageElement
       continue;
     }
     if (is_overlay_control_image(node)) {
+      continue;
+    }
+    if (is_overlay_indicator_image(node)) {
       continue;
     }
     if (is_likely_tracking_pixel(node)) {

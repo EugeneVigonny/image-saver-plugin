@@ -106,3 +106,31 @@
     transform: rotate(360deg);
   }
 }
+
+.image-saver-plugin__enabled-indicator {
+  position: fixed;
+  right: 16px;
+  bottom: 16px;
+  z-index: 2147483647;
+  width: 64px;
+  height: 64px;
+  border-radius: 14px;
+  background: #4caf50;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+}
+
+.image-saver-plugin__enabled-indicator[data-image-saver-visible="true"] {
+  display: flex;
+}
+
+.image-saver-plugin__enabled-indicator > .image-saver-plugin__enabled-indicator-icon {
+  width: 60px;
+  height: 60px;
+  max-width: none;
+  max-height: none;
+  object-fit: contain;
+  pointer-events: none;
+}

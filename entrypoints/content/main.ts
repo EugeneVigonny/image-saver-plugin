@@ -1,10 +1,12 @@
 import "./content.css";
+import enabled_icon_url from "../../assets/content/enabled-svgrepo-com.svg?url";
 import { daemon_health } from "../shared/daemon_client";
 import { create_logger } from "../shared/logger";
 import { subscribe_image_dom_changes } from "./image_observer";
 import { ImageOverlayController } from "./overlay";
 import { OutcomeCacheRegistry } from "./outcome_cache";
 import { query_image_elements } from "./query_images";
+import { IMAGE_SAVER_ROOT_ATTR } from "./constants";
 
 const log = create_logger("content");
 
@@ -25,6 +27,7 @@ export function run_content_app(): void {
   let overlays_enabled = false;
   let observer: Readonly<{ disconnect(): void }> | null = null;
   let gate_retry_timer: ReturnType<typeof setTimeout> | null = null;
+  let enabled_indicator: HTMLElement | null = null;
   const deps = { outcome_cache, in_flight };
 
   const image_signature = (img: HTMLImageElement): string => {
@@ -40,6 +43,38 @@ export function run_content_app(): void {
     }
     active.clear();
     observed_signatures.clear();
+    sync_enabled_indicator();
+  };
+
+  const ensure_enabled_indicator = (): HTMLElement => {
+    if (enabled_indicator !== null) {
+      return enabled_indicator;
+    }
+    const root = document.createElement("div");
+    root.className = "image-saver-plugin__enabled-indicator";
+    root.setAttribute(IMAGE_SAVER_ROOT_ATTR, "");
+    const icon = document.createElement("img");
+    icon.className = "image-saver-plugin__enabled-indicator-icon";
+    icon.src = enabled_icon_url;
+    icon.alt = "Overlay active";
+    root.appendChild(icon);
+    document.body.appendChild(root);
+    enabled_indicator = root;
+    return root;
+  };
+
+  const sync_enabled_indicator = (): void => {
+    const should_show = overlays_enabled && active.size > 0;
+    const node = ensure_enabled_indicator();
+    node.setAttribute("data-image-saver-visible", should_show ? "true" : "false");
+  };
+
+  const dispose_enabled_indicator = (): void => {
+    if (enabled_indicator === null) {
+      return;
+    }
+    enabled_indicator.remove();
+    enabled_indicator = null;
   };
 
   const stop_observer = (): void => {
@@ -94,6 +129,7 @@ export function run_content_app(): void {
         }
       }
     }
+    sync_enabled_indicator();
   };
 
   const has_configured_directory = async (): Promise<boolean> => {
@@ -140,6 +176,7 @@ export function run_content_app(): void {
       }
       teardown_overlays();
       stop_observer();
+      sync_enabled_indicator();
       return;
     }
     clear_gate_retry();
@@ -197,6 +234,7 @@ export function run_content_app(): void {
         clear_gate_retry();
         stop_observer();
         teardown_overlays();
+        dispose_enabled_indicator();
       };
       window.addEventListener("pagehide", on_page_hide);
     })
