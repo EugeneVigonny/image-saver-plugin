@@ -3,8 +3,7 @@ import ok_icon_url from "../../assets/content/ok-svgrepo-com.svg?url";
 import spinner_icon_url from "../../assets/content/spinner-svgrepo-com.svg?url";
 import error_icon_url from "../../assets/content/error-svgrepo-com.svg?url";
 import { suggested_name_from_image_url } from "../shared/naming";
-import { daemon_image_exists, daemon_save_image_multipart } from "../shared/daemon_client";
-import { download_image } from "../shared/download_image";
+import { daemon_image_exists, daemon_save_image_from_url } from "../shared/daemon_client";
 import { create_logger } from "../shared/logger";
 import { IMAGE_SAVER_ROOT_ATTR } from "./constants";
 import { make_job_dedup_key } from "../shared/job_dedup_key";
@@ -58,25 +57,34 @@ async function load_save_image_options(): Promise<SaveImageOptions> {
 }
 
 function unwrap_target_image(img: HTMLImageElement): void {
-  const wrap = img.parentElement;
-  if (wrap === null || wrap.getAttribute(IMAGE_SAVER_ROOT_ATTR) === null) {
+  const wrap = img.closest(`[${IMAGE_SAVER_ROOT_ATTR}]`);
+  if (!(wrap instanceof HTMLElement)) {
+    return;
+  }
+  const wrapped_node = wrap.firstElementChild;
+  if (wrapped_node === null) {
+    wrap.remove();
+    img.classList.remove("image-saver-plugin__target");
     return;
   }
   const parent = wrap.parentNode;
   if (parent === null) {
     return;
   }
-  parent.insertBefore(img, wrap);
+  parent.insertBefore(wrapped_node, wrap);
   wrap.remove();
   img.classList.remove("image-saver-plugin__target");
 }
 
 function ensure_wrap(img: HTMLImageElement): HTMLElement | null {
-  const existing = img.parentElement;
+  const target: HTMLElement =
+    img.parentElement instanceof HTMLPictureElement ? img.parentElement : img;
+
+  const existing = target.parentElement;
   if (existing !== null && existing.getAttribute(IMAGE_SAVER_ROOT_ATTR) !== null) {
     return existing;
   }
-  const parent = img.parentNode;
+  const parent = target.parentNode;
   if (parent === null) {
     return null;
   }
@@ -84,8 +92,8 @@ function ensure_wrap(img: HTMLImageElement): HTMLElement | null {
   wrap.setAttribute(IMAGE_SAVER_ROOT_ATTR, "");
   wrap.className = "image-saver-plugin__wrap";
   img.classList.add("image-saver-plugin__target");
-  parent.insertBefore(wrap, img);
-  wrap.appendChild(img);
+  parent.insertBefore(wrap, target);
+  wrap.appendChild(target);
   return wrap;
 }
 
@@ -307,11 +315,10 @@ export class ImageOverlayController {
         return;
       }
 
-      const blob = await download_image(resolved.url);
       const options = await load_save_image_options();
-      await daemon_save_image_multipart({
+      await daemon_save_image_from_url({
         file_name: suggested_name,
-        blob,
+        image_url: resolved.url,
         options
       });
       await this.deps.outcome_cache.set_saved(key);

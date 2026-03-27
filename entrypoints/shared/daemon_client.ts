@@ -2,10 +2,6 @@ import { create_logger } from "./logger";
 
 const log = create_logger("daemon_client");
 
-const default_daemon_base_url = "http://127.0.0.1:8765";
-const daemon_base_url =
-  (import.meta.env["WXT_DAEMON_BASE_URL"] as string | undefined)?.trim() || default_daemon_base_url;
-
 export type SaveImageOptions = Readonly<{
   max_long_edge?: number;
   quality?: number;
@@ -27,135 +23,80 @@ export type SaveImageResponse = Readonly<{
   skipped: boolean;
 }>;
 
-type DaemonJsonOk<T> = Readonly<{ ok: true } & T>;
-const daemon_health_timeout_ms = 2500;
-
-function trim_trailing_slash(value: string): string {
-  return value.endsWith("/") ? value.slice(0, -1) : value;
-}
-
-function daemon_url(path: string): string {
-  return `${trim_trailing_slash(daemon_base_url)}${path}`;
-}
-
-function to_daemon_error(status: number, body: unknown, fallback: string): DaemonError {
-  if (typeof body === "object" && body !== null) {
-    const row = body as Record<string, unknown>;
-    const code = typeof row["code"] === "string" ? row["code"] : undefined;
-    const message_candidate =
-      typeof row["error"] === "string"
-        ? row["error"]
-        : typeof row["message"] === "string"
-          ? row["message"]
-          : fallback;
-    if (code !== undefined) {
-      return { status, code, message: message_candidate };
-    }
-    return { status, message: message_candidate };
-  }
-  return { status, message: fallback };
-}
-
-async function parse_json_body(response: Response): Promise<unknown> {
-  try {
-    return await response.json();
-  } catch {
-    return null;
-  }
-}
-
-async function build_headers(content_type?: string): Promise<HeadersInit> {
-  const headers: Record<string, string> = {};
-  if (content_type !== undefined) {
-    headers["Content-Type"] = content_type;
-  }
-  return headers;
-}
-
-async function request_json<T>(
-  path: string,
-  method: "GET" | "PUT",
-  body?: unknown,
-  signal?: AbortSignal
-): Promise<DaemonJsonOk<T>> {
-  const headers = await build_headers(body === undefined ? undefined : "application/json");
-  const init: RequestInit = {
-    method,
-    headers
+type ProxyRequestMap = {
+  "daemon.health": { type: "daemon.health" };
+  "daemon.get_save_directory": { type: "daemon.get_save_directory" };
+  "daemon.set_save_directory": { type: "daemon.set_save_directory"; path: string };
+  "daemon.image_exists": { type: "daemon.image_exists"; file_name: string };
+  "daemon.save_image_from_url": {
+    type: "daemon.save_image_from_url";
+    file_name: string;
+    image_url: string;
+    options?: SaveImageOptions;
   };
-  if (signal !== undefined) {
-    init.signal = signal;
+  "daemon.save_image": {
+    type: "daemon.save_image";
+    file_name: string;
+    blob: Blob;
+    options?: SaveImageOptions;
+  };
+};
+
+type ProxySuccessMap = {
+  "daemon.health": { version: string; protocol: number };
+  "daemon.get_save_directory": { path: string | null };
+  "daemon.set_save_directory": { path: string };
+  "daemon.image_exists": { exists: boolean };
+  "daemon.save_image_from_url": { written_path: string; skipped: boolean };
+  "daemon.save_image": { written_path: string; skipped: boolean };
+};
+
+type ProxyFailure = { ok: false; status: number; code?: string; message: string };
+type ProxySuccess<K extends keyof ProxySuccessMap> = {
+  ok: true;
+  type: K;
+  data: ProxySuccessMap[K];
+};
+
+function is_daemon_error(value: unknown): value is DaemonError {
+  if (typeof value !== "object" || value === null) {
+    return false;
   }
-  if (body !== undefined) {
-    init.body = JSON.stringify(body);
-  }
-  let response: Response;
-  try {
-    response = await fetch(daemon_url(path), init);
-  } catch (error: unknown) {
-    throw to_transport_error(error, path);
-  }
-  const parsed = await parse_json_body(response);
-  if (!response.ok) {
-    throw to_daemon_error(response.status, parsed, `Daemon request failed: ${path}`);
-  }
-  if (
-    typeof parsed !== "object" ||
-    parsed === null ||
-    (parsed as Record<string, unknown>)["ok"] !== true
-  ) {
-    throw {
-      status: response.status,
-      message: `Daemon response has invalid shape: ${path}`
-    } satisfies DaemonError;
-  }
-  return parsed as DaemonJsonOk<T>;
+  const row = value as Record<string, unknown>;
+  return typeof row["status"] === "number" && typeof row["message"] === "string";
+}
+
+function to_daemon_error_from_failure(failure: ProxyFailure): DaemonError {
+  return failure.code === undefined
+    ? { status: failure.status, message: failure.message }
+    : { status: failure.status, code: failure.code, message: failure.message };
 }
 
 export async function daemon_health(): Promise<DaemonHealth> {
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), daemon_health_timeout_ms);
-  try {
-    const response = await request_json<{ version: string; protocol: number }>(
-      "/v1/health",
-      "GET",
-      undefined,
-      controller.signal
-    );
-    return {
-      version: response.version,
-      protocol: response.protocol
-    };
-  } finally {
-    clearTimeout(timeout);
-  }
+  const response = await request_via_background("daemon.health", { type: "daemon.health" });
+  return response;
 }
 
 export async function daemon_set_save_directory(path: string): Promise<string> {
-  const response = await request_json<{ path: string }>("/v1/save-directory", "PUT", { path });
+  const response = await request_via_background("daemon.set_save_directory", {
+    type: "daemon.set_save_directory",
+    path
+  });
   return response.path;
 }
 
 export async function daemon_get_save_directory(): Promise<string | null> {
-  try {
-    const response = await request_json<{ path: string }>("/v1/save-directory", "GET");
-    return response.path;
-  } catch (error: unknown) {
-    if (typeof error === "object" && error !== null) {
-      const row = error as DaemonError;
-      if (row.code === "E_NOT_CONFIGURED") {
-        return null;
-      }
-    }
-    throw error;
-  }
+  const response = await request_via_background("daemon.get_save_directory", {
+    type: "daemon.get_save_directory"
+  });
+  return response.path;
 }
 
 export async function daemon_image_exists(file_name: string): Promise<boolean> {
-  const response = await request_json<{ exists: boolean }>(
-    `/v1/images/exists?file_name=${encodeURIComponent(file_name)}`,
-    "GET"
-  );
+  const response = await request_via_background("daemon.image_exists", {
+    type: "daemon.image_exists",
+    file_name
+  });
   return response.exists;
 }
 
@@ -164,55 +105,86 @@ export async function daemon_save_image_multipart(params: {
   blob: Blob;
   options?: SaveImageOptions;
 }): Promise<SaveImageResponse> {
-  const form = new FormData();
-  form.append(
-    "meta",
-    JSON.stringify({
-      file_name: params.file_name,
-      options: params.options
-    })
-  );
-  form.append("file", params.blob, params.file_name);
-
-  let response: Response;
-  try {
-    response = await fetch(daemon_url("/v1/images"), {
-      method: "POST",
-      body: form
-    });
-  } catch (error: unknown) {
-    throw to_transport_error(error, "/v1/images");
+  const request: ProxyRequestMap["daemon.save_image"] = {
+    type: "daemon.save_image",
+    file_name: params.file_name,
+    blob: params.blob
+  };
+  if (params.options !== undefined) {
+    request.options = params.options;
   }
-  const parsed = await parse_json_body(response);
-  if (!response.ok) {
-    throw to_daemon_error(response.status, parsed, "save_image failed");
-  }
-  if (typeof parsed !== "object" || parsed === null) {
-    throw {
-      status: response.status,
-      message: "save_image invalid JSON response"
-    } satisfies DaemonError;
-  }
-  const row = parsed as Record<string, unknown>;
-  if (
-    row["ok"] !== true ||
-    typeof row["written_path"] !== "string" ||
-    typeof row["skipped"] !== "boolean"
-  ) {
-    throw {
-      status: response.status,
-      message: "save_image response shape mismatch"
-    } satisfies DaemonError;
-  }
+  const response = await request_via_background("daemon.save_image", request);
   log.info("daemon_save_image_multipart done", {
     file_name: params.file_name,
     bytes: params.blob.size,
-    skipped: row["skipped"]
+    skipped: response.skipped
   });
   return {
-    written_path: row["written_path"],
-    skipped: row["skipped"]
+    written_path: response.written_path,
+    skipped: response.skipped
   };
+}
+
+export async function daemon_save_image_from_url(params: {
+  file_name: string;
+  image_url: string;
+  options?: SaveImageOptions;
+}): Promise<SaveImageResponse> {
+  const request: ProxyRequestMap["daemon.save_image_from_url"] = {
+    type: "daemon.save_image_from_url",
+    file_name: params.file_name,
+    image_url: params.image_url
+  };
+  if (params.options !== undefined) {
+    request.options = params.options;
+  }
+  const response = await request_via_background("daemon.save_image_from_url", request);
+  log.info("daemon_save_image_from_url done", {
+    file_name: params.file_name,
+    image_url: params.image_url,
+    skipped: response.skipped
+  });
+  return {
+    written_path: response.written_path,
+    skipped: response.skipped
+  };
+}
+
+async function request_via_background<K extends keyof ProxySuccessMap>(
+  expected_type: K,
+  request: ProxyRequestMap[K]
+): Promise<ProxySuccessMap[K]> {
+  try {
+    const response = (await browser.runtime.sendMessage(request)) as
+      | ProxySuccess<K>
+      | ProxyFailure
+      | null
+      | undefined;
+    if (typeof response !== "object" || response === null || !("ok" in response)) {
+      throw {
+        status: 0,
+        code: "E_NETWORK",
+        message: `Invalid proxy response for ${request.type}`
+      } satisfies DaemonError;
+    }
+    if (!response.ok) {
+      throw to_daemon_error_from_failure(response);
+    }
+    if (response.type !== expected_type) {
+      throw {
+        status: 0,
+        code: "E_NETWORK",
+        message: `Proxy response type mismatch for ${request.type}`
+      } satisfies DaemonError;
+    }
+    return response.data;
+  } catch (error: unknown) {
+    if (is_daemon_error(error)) {
+      throw error;
+    }
+    const transport = to_transport_error(error, request.type);
+    throw transport;
+  }
 }
 
 function to_transport_error(error: unknown, path: string): DaemonError {

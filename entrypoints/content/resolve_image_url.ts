@@ -19,7 +19,7 @@ function raw_is_data_svg_xml(raw: string): boolean {
 }
 
 /** Превью/плейсхолдеры: подстрока `sample` в исходном src или в разрешённом href. */
-function url_contains_sample_token(raw: string, absolute_href: string): boolean {
+function url_is_project_sample_placeholder(raw: string, absolute_href: string): boolean {
   return raw.toLowerCase().includes("sample") || absolute_href.toLowerCase().includes("sample");
 }
 
@@ -35,7 +35,7 @@ export function is_sample_placeholder_image_element(
   if (raw.length === 0) {
     return false;
   }
-  if (raw.toLowerCase().includes("sample")) {
+  if (url_is_project_sample_placeholder(raw, raw)) {
     return true;
   }
   try {
@@ -43,7 +43,7 @@ export function is_sample_placeholder_image_element(
     if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
       return false;
     }
-    return parsed.href.toLowerCase().includes("sample");
+    return url_is_project_sample_placeholder(raw, parsed.href);
   } catch {
     return false;
   }
@@ -96,7 +96,7 @@ export function resolve_image_url_from_element(
     return { ok: false, reason: "unsupported_scheme" };
   }
 
-  if (url_contains_sample_token(raw, parsed.href)) {
+  if (url_is_project_sample_placeholder(raw, parsed.href)) {
     return { ok: false, reason: "sample" };
   }
 
