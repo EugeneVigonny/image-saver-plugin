@@ -195,7 +195,12 @@ pub async fn save_image_handler(
         save_dir_guard.clone()
     };
 
-    match save_image(save_dir.as_deref(), &meta.file_name, &file) {
+    match save_image(
+        save_dir.as_deref(),
+        &meta.file_name,
+        &file,
+        meta.options.as_ref(),
+    ) {
         Ok(row) => {
             let response = SaveImageResponse {
                 ok: true,
@@ -210,6 +215,10 @@ pub async fn save_image_handler(
         Err(SaveImageError::InvalidInput(message)) => {
             error_mapper::bad_request("E_INVALID_INPUT", message)
         }
+        Err(SaveImageError::UnsupportedMediaType(message)) => {
+            error_mapper::unsupported_media(message)
+        }
+        Err(SaveImageError::ImageDecodeFailed(message)) => error_mapper::image_decode(message),
         Err(SaveImageError::Io(message)) => error_mapper::internal_io(message),
     }
 }

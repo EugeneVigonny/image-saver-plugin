@@ -25,3 +25,19 @@ pub fn internal_io(message: impl Into<String>) -> (StatusCode, Json<serde_json::
         Json(serde_json::json!(response)),
     )
 }
+
+pub fn unsupported_media(message: impl Into<String>) -> (StatusCode, Json<serde_json::Value>) {
+    let response = ErrorResponse::new("E_UNSUPPORTED_MEDIA", message);
+    (
+        StatusCode::UNSUPPORTED_MEDIA_TYPE,
+        Json(serde_json::json!(response)),
+    )
+}
+
+pub fn image_decode(message: impl Into<String>) -> (StatusCode, Json<serde_json::Value>) {
+    let response = ErrorResponse::new("E_IMAGE_DECODE", message);
+    (
+        StatusCode::INTERNAL_SERVER_ERROR,
+        Json(serde_json::json!(response)),
+    )
+}

@@ -19,7 +19,24 @@ pub struct ImageExistsResponse {
 
 #[derive(Debug, Deserialize)]
 pub struct UploadMeta {
+    /// Target file name in save directory (base name only, without path separators).
     pub file_name: String,
+    /// Optional transform settings applied before write.
+    ///
+    /// If omitted, backend stores original bytes as-is.
+    pub options: Option<UploadOptions>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct UploadOptions {
+    /// Resize image so the longer side is at most this value.
+    ///
+    /// Expected range: `1..=8192`.
+    pub max_long_edge: Option<u32>,
+    /// Lossy quality for formats that support it (e.g. JPEG/WebP).
+    ///
+    /// Expected range: `1..=100`. Ignored for non-lossy encoders.
+    pub quality: Option<u8>,
 }
 
 #[derive(Debug, Serialize)]

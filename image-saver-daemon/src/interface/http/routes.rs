@@ -36,17 +36,48 @@ mod tests {
         body::{Body, to_bytes},
         http::{Request, StatusCode, header},
     };
+    use image::{DynamicImage, GenericImageView, ImageFormat};
     use tokio::sync::RwLock;
     use tower::ServiceExt as _;
 
     use super::{AppState, build_router};
 
     fn make_upload_body(file_name: &str, payload: &[u8]) -> (String, String) {
+        make_upload_body_with_meta_json(
+            file_name,
+            &format!("{{\"file_name\":\"{file_name}\"}}"),
+            payload,
+        )
+    }
+
+    fn make_upload_body_with_meta_json(
+        file_name: &str,
+        meta_json: &str,
+        payload: &[u8],
+    ) -> (String, String) {
         let boundary = "----image-saver-boundary";
         let body = format!(
-            "--{boundary}\r\nContent-Disposition: form-data; name=\"meta\"\r\nContent-Type: application/json\r\n\r\n{{\"file_name\":\"{file_name}\"}}\r\n--{boundary}\r\nContent-Disposition: form-data; name=\"file\"; filename=\"{file_name}\"\r\nContent-Type: application/octet-stream\r\n\r\n{}\r\n--{boundary}--\r\n",
+            "--{boundary}\r\nContent-Disposition: form-data; name=\"meta\"\r\nContent-Type: application/json\r\n\r\n{meta_json}\r\n--{boundary}\r\nContent-Disposition: form-data; name=\"file\"; filename=\"{file_name}\"\r\nContent-Type: application/octet-stream\r\n\r\n{}\r\n--{boundary}--\r\n",
             String::from_utf8_lossy(payload)
         );
+        (boundary.to_string(), body)
+    }
+
+    fn make_upload_body_with_meta_json_bytes(
+        file_name: &str,
+        meta_json: &str,
+        payload: &[u8],
+    ) -> (String, Vec<u8>) {
+        let boundary = "----image-saver-boundary";
+        let head = format!(
+            "--{boundary}\r\nContent-Disposition: form-data; name=\"meta\"\r\nContent-Type: application/json\r\n\r\n{meta_json}\r\n--{boundary}\r\nContent-Disposition: form-data; name=\"file\"; filename=\"{file_name}\"\r\nContent-Type: application/octet-stream\r\n\r\n"
+        );
+        let tail = format!("\r\n--{boundary}--\r\n");
+
+        let mut body = Vec::with_capacity(head.len() + payload.len() + tail.len());
+        body.extend_from_slice(head.as_bytes());
+        body.extend_from_slice(payload);
+        body.extend_from_slice(tail.as_bytes());
         (boundary.to_string(), body)
     }
 
@@ -394,5 +425,92 @@ mod tests {
             .expect("router must respond");
 
         assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn save_image_returns_unsupported_media_when_options_require_transform() {
+        let dir = std::env::temp_dir();
+        let app = build_router(AppState {
+            save_directory: Arc::new(RwLock::new(Some(dir))),
+        });
+        let meta_json = "{\"file_name\":\"bad.bin\",\"options\":{\"max_long_edge\":128}}";
+        let (boundary, body) = make_upload_body_with_meta_json("bad.bin", meta_json, b"not-image");
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/v1/images")
+                    .header(
+                        header::CONTENT_TYPE,
+                        format!("multipart/form-data; boundary={boundary}"),
+                    )
+                    .body(Body::from(body))
+                    .expect("request builder must be valid"),
+            )
+            .await
+            .expect("router must respond");
+
+        assert_eq!(response.status(), StatusCode::UNSUPPORTED_MEDIA_TYPE);
+        let bytes = to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("body must be readable");
+        let json: serde_json::Value =
+            serde_json::from_slice(&bytes).expect("response must be valid json");
+        assert_eq!(
+            json.get("code").and_then(serde_json::Value::as_str),
+            Some("E_UNSUPPORTED_MEDIA")
+        );
+    }
+
+    #[tokio::test]
+    async fn save_image_resizes_jpeg_when_max_long_edge_is_set() {
+        let dir = std::env::temp_dir();
+        let file_name = "upload_resize_with_options_test.jpg";
+        let full_path = dir.join(file_name);
+        let _ = std::fs::remove_file(&full_path);
+
+        let source = DynamicImage::new_rgb8(200, 100);
+        let mut jpeg_bytes = Vec::new();
+        source
+            .write_to(
+                &mut std::io::Cursor::new(&mut jpeg_bytes),
+                ImageFormat::Jpeg,
+            )
+            .expect("must build jpeg test image");
+
+        let app = build_router(AppState {
+            save_directory: Arc::new(RwLock::new(Some(dir.clone()))),
+        });
+        let meta_json = format!(
+            "{{\"file_name\":\"{file_name}\",\"options\":{{\"max_long_edge\":64,\"quality\":70}}}}"
+        );
+        let (boundary, body) =
+            make_upload_body_with_meta_json_bytes(file_name, &meta_json, &jpeg_bytes);
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/v1/images")
+                    .header(
+                        header::CONTENT_TYPE,
+                        format!("multipart/form-data; boundary={boundary}"),
+                    )
+                    .body(Body::from(body))
+                    .expect("request builder must be valid"),
+            )
+            .await
+            .expect("router must respond");
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let written = std::fs::read(&full_path).expect("must read output image");
+        let format = image::guess_format(&written).expect("must detect format");
+        assert_eq!(format, ImageFormat::Jpeg);
+        let decoded = image::load_from_memory(&written).expect("must decode output");
+        let (w, h) = decoded.dimensions();
+        assert_eq!(w.max(h), 64);
+
+        let _ = std::fs::remove_file(full_path);
     }
 }
