@@ -163,6 +163,16 @@ export function run_content_app(): void {
     }
   };
 
+  const on_image_load = (event: Event): void => {
+    if (!(event.target instanceof HTMLImageElement)) {
+      return;
+    }
+    if (!overlays_enabled) {
+      return;
+    }
+    reconcile();
+  };
+
   const on_storage_changed = (
     changes: Record<string, { oldValue?: unknown; newValue?: unknown }>,
     area: string
@@ -176,11 +186,13 @@ export function run_content_app(): void {
   void apply_daemon_gate()
     .then(() => {
       document.addEventListener("visibilitychange", on_visibility_change);
+      document.addEventListener("load", on_image_load, true);
       browser.storage.onChanged.addListener(on_storage_changed);
 
       const on_page_hide = (): void => {
         window.removeEventListener("pagehide", on_page_hide);
         document.removeEventListener("visibilitychange", on_visibility_change);
+        document.removeEventListener("load", on_image_load, true);
         browser.storage.onChanged.removeListener(on_storage_changed);
         clear_gate_retry();
         stop_observer();
