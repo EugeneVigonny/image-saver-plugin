@@ -20,17 +20,26 @@ export function run_content_app(): void {
   const outcome_cache = new OutcomeCacheRegistry();
   const in_flight = new Set<string>();
   const active = new Map<HTMLImageElement, ImageOverlayController>();
+  const observed_signatures = new Map<HTMLImageElement, string>();
 
   let overlays_enabled = false;
   let observer: Readonly<{ disconnect(): void }> | null = null;
   let gate_retry_timer: ReturnType<typeof setTimeout> | null = null;
   const deps = { outcome_cache, in_flight };
 
+  const image_signature = (img: HTMLImageElement): string => {
+    const current_src = img.currentSrc ?? "";
+    const src = img.getAttribute("src") ?? "";
+    const srcset = img.getAttribute("srcset") ?? "";
+    return `${current_src}||${src}||${srcset}`;
+  };
+
   const teardown_overlays = (): void => {
     for (const ctrl of active.values()) {
       ctrl.dispose();
     }
     active.clear();
+    observed_signatures.clear();
   };
 
   const stop_observer = (): void => {
@@ -68,14 +77,21 @@ export function run_content_app(): void {
       if (!found.has(img) || !document.contains(img)) {
         ctrl.dispose();
         active.delete(img);
+        observed_signatures.delete(img);
       }
     }
 
     for (const img of found) {
+      const next_signature = image_signature(img);
       if (!active.has(img)) {
         active.set(img, new ImageOverlayController(img, deps));
+        observed_signatures.set(img, next_signature);
       } else {
-        void active.get(img)!.refresh();
+        const prev_signature = observed_signatures.get(img);
+        if (prev_signature !== next_signature) {
+          observed_signatures.set(img, next_signature);
+          void active.get(img)!.refresh();
+        }
       }
     }
   };
