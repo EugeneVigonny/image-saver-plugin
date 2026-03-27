@@ -29,6 +29,12 @@
   justify-content: center;
 }
 
+.image-saver-plugin__btn.image-saver-plugin__btn--compact {
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+}
+
 .image-saver-plugin__wrap.image-saver-plugin__wrap--unsupported .image-saver-plugin__btn {
   display: none !important;
   visibility: hidden;
@@ -76,6 +82,15 @@
   object-fit: contain;
   display: none;
   pointer-events: none;
+}
+
+.image-saver-plugin__btn.image-saver-plugin__btn--compact > .image-saver-plugin__icon-layer {
+  width: 24px;
+  height: 24px;
+  min-width: 24px;
+  min-height: 24px;
+  margin-left: -12px;
+  margin-top: -12px;
 }
 
 .image-saver-plugin__btn > .image-saver-plugin__icon-layer[data-image-saver-visible="true"] {

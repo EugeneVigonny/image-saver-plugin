@@ -28,6 +28,7 @@ type ProxyRequestMap = {
   "daemon.get_save_directory": { type: "daemon.get_save_directory" };
   "daemon.set_save_directory": { type: "daemon.set_save_directory"; path: string };
   "daemon.image_exists": { type: "daemon.image_exists"; file_name: string };
+  "daemon.find_image_by_name": { type: "daemon.find_image_by_name"; name: string };
   "daemon.save_image_from_url": {
     type: "daemon.save_image_from_url";
     file_name: string;
@@ -47,6 +48,7 @@ type ProxySuccessMap = {
   "daemon.get_save_directory": { path: string | null };
   "daemon.set_save_directory": { path: string };
   "daemon.image_exists": { exists: boolean };
+  "daemon.find_image_by_name": { result: string[] };
   "daemon.save_image_from_url": { written_path: string; skipped: boolean };
   "daemon.save_image": { written_path: string; skipped: boolean };
 };
@@ -98,6 +100,14 @@ export async function daemon_image_exists(file_name: string): Promise<boolean> {
     file_name
   });
   return response.exists;
+}
+
+export async function daemon_find_image_by_name(name: string): Promise<string[]> {
+  const response = await request_via_background("daemon.find_image_by_name", {
+    type: "daemon.find_image_by_name",
+    name
+  });
+  return response.result;
 }
 
 export async function daemon_save_image_multipart(params: {

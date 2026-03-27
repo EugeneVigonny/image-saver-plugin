@@ -3,10 +3,15 @@ import ok_icon_url from "../../assets/content/ok-svgrepo-com.svg?url";
 import spinner_icon_url from "../../assets/content/spinner-svgrepo-com.svg?url";
 import error_icon_url from "../../assets/content/error-svgrepo-com.svg?url";
 import { suggested_name_from_image_url } from "../shared/naming";
-import { daemon_image_exists, daemon_save_image_from_url } from "../shared/daemon_client";
+import {
+  daemon_find_image_by_name,
+  daemon_image_exists,
+  daemon_save_image_from_url
+} from "../shared/daemon_client";
 import { create_logger } from "../shared/logger";
 import { IMAGE_SAVER_ROOT_ATTR } from "./constants";
 import { make_job_dedup_key } from "../shared/job_dedup_key";
+import { extract_gallery_stem_from_url } from "./extract_gallery_stem";
 import { resolve_image_url_from_element } from "./resolve_image_url";
 import type { OutcomeCacheRegistry } from "./outcome_cache";
 import type { SaveImageOptions } from "../shared/daemon_client";
@@ -170,7 +175,44 @@ export class ImageOverlayController {
       return;
     }
     await this.deps.outcome_cache.ensure_loaded();
-    const resolved = resolve_image_url_from_element(this.img, globalThis.location.href);
+    const source_page_url = globalThis.location.href;
+    const raw_image_url = (this.img.currentSrc || this.img.src || "").trim();
+    let absolute_image_url: string | null = null;
+    if (raw_image_url.length > 0) {
+      try {
+        absolute_image_url = new URL(raw_image_url, source_page_url).href;
+      } catch {
+        absolute_image_url = null;
+      }
+    }
+
+    if (absolute_image_url !== null) {
+      const gallery_stem = extract_gallery_stem_from_url(absolute_image_url);
+      if (gallery_stem !== null) {
+        this.set_gallery_compact_mode(true);
+        this.set_visual("hidden");
+        try {
+          const matches = await daemon_find_image_by_name(gallery_stem);
+          if (matches.length > 0) {
+            this.set_visual("saved");
+            const tooltip = matches.join(", ");
+            this.button.title = tooltip;
+            this.button.setAttribute("aria-label", `Файл найден: ${tooltip}`);
+          } else {
+            this.set_visual("hidden");
+          }
+        } catch (error: unknown) {
+          const detail = error_to_text(error);
+          this.button.title = detail;
+          this.button.setAttribute("aria-label", `Ошибка проверки: ${detail}`);
+          this.set_visual("error");
+        }
+        return;
+      }
+    }
+    this.set_gallery_compact_mode(false);
+
+    const resolved = resolve_image_url_from_element(this.img, source_page_url);
     if (!resolved.ok) {
       this.set_visual("hidden");
       return;
@@ -236,6 +278,13 @@ export class ImageOverlayController {
     if (target !== null) {
       target.setAttribute("data-image-saver-visible", "true");
     }
+  }
+
+  private set_gallery_compact_mode(enabled: boolean): void {
+    if (this.button === null) {
+      return;
+    }
+    this.button.classList.toggle("image-saver-plugin__btn--compact", enabled);
   }
 
   private set_visual(state: OverlayVisual): void {

@@ -12,6 +12,7 @@ type ProxyRequest =
   | { type: "daemon.get_save_directory" }
   | { type: "daemon.set_save_directory"; path: string }
   | { type: "daemon.image_exists"; file_name: string }
+  | { type: "daemon.find_image_by_name"; name: string }
   | {
       type: "daemon.save_image_from_url";
       file_name: string;
@@ -30,6 +31,7 @@ type ProxySuccess =
   | { ok: true; type: "daemon.get_save_directory"; data: { path: string | null } }
   | { ok: true; type: "daemon.set_save_directory"; data: { path: string } }
   | { ok: true; type: "daemon.image_exists"; data: { exists: boolean } }
+  | { ok: true; type: "daemon.find_image_by_name"; data: { result: string[] } }
   | {
       ok: true;
       type: "daemon.save_image_from_url";
@@ -201,6 +203,17 @@ async function handle_proxy_request(request: ProxyRequest): Promise<ProxyRespons
       return result;
     }
     return { ok: true, type: "daemon.image_exists", data: { exists: result.exists } };
+  }
+
+  if (request.type === "daemon.find_image_by_name") {
+    const result = await request_json<{ ok: true; result: string[] }>(
+      `/v1/images/find?name=${encodeURIComponent(request.name)}`,
+      "GET"
+    );
+    if ("ok" in result && result.ok === false) {
+      return result;
+    }
+    return { ok: true, type: "daemon.find_image_by_name", data: { result: result.result } };
   }
 
   if (request.type === "daemon.save_image_from_url") {
