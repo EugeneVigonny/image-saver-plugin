@@ -23,6 +23,12 @@ pub struct ImageExistsResponse {
     pub exists: bool,
 }
 
+#[derive(Debug, Serialize)]
+pub struct FindImageByNameResponse {
+    pub ok: bool,
+    pub result: Vec<String>,
+}
+
 #[derive(Debug, Deserialize)]
 pub struct UploadMeta {
     /// Target file name in save directory (base name only, without path separators).

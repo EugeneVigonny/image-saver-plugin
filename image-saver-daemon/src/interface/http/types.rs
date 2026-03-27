@@ -5,6 +5,11 @@ pub(crate) struct ImageExistsQuery {
     pub(crate) file_name: String,
 }
 
+#[derive(Debug, serde::Deserialize)]
+pub(crate) struct FindImageByNameQuery {
+    pub(crate) name: String,
+}
+
 #[derive(Debug, Default)]
 pub(crate) struct MultipartParts {
     pub(crate) meta: Option<UploadMeta>,

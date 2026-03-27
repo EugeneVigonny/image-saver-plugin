@@ -9,13 +9,14 @@ use crate::application::{
     commands::save_image::{SaveImageError, save_image},
     commands::set_save_directory::{SetSaveDirectoryError, set_save_directory},
     dto::{
-        GetSaveDirectoryResponse, ImageExistsResponse, SaveImageResponse, SetSaveDirectoryRequest,
-        SetSaveDirectoryResponse, UploadMeta,
+        FindImageByNameResponse, GetSaveDirectoryResponse, ImageExistsResponse, SaveImageResponse,
+        SetSaveDirectoryRequest, SetSaveDirectoryResponse, UploadMeta,
     },
+    queries::find_image_by_name::{FindImageByNameError, find_image_by_name},
     queries::health::{HealthResponse, health_response},
     queries::image_exists::{ImageExistsError, image_exists},
 };
-use crate::interface::http::types::{ImageExistsQuery, MultipartParts};
+use crate::interface::http::types::{FindImageByNameQuery, ImageExistsQuery, MultipartParts};
 use crate::interface::http::{error_mapper, routes::AppState};
 
 pub async fn health_handler() -> Json<HealthResponse> {
@@ -112,6 +113,39 @@ pub async fn image_exists_handler(
         }
         Err(ImageExistsError::Io(message)) => {
             error!(reason = %message, "image exists io check failed");
+            error_mapper::internal_io(message)
+        }
+    }
+}
+
+pub async fn find_image_by_name_handler(
+    State(state): State<AppState>,
+    Query(query): Query<FindImageByNameQuery>,
+) -> (StatusCode, Json<serde_json::Value>) {
+    info!(
+        endpoint = "/v1/images/find",
+        method = "GET",
+        "find image by name called"
+    );
+
+    let save_dir = {
+        let save_dir_guard = state.save_directory.read().await;
+        save_dir_guard.clone()
+    };
+
+    match find_image_by_name(save_dir.as_deref(), &query.name) {
+        Ok(result) => {
+            let response = FindImageByNameResponse { ok: true, result };
+            (StatusCode::OK, Json(serde_json::json!(response)))
+        }
+        Err(FindImageByNameError::NotConfigured) => {
+            error_mapper::bad_request("E_NOT_CONFIGURED", "save directory is not configured")
+        }
+        Err(FindImageByNameError::InvalidInput(message)) => {
+            error_mapper::bad_request("E_INVALID_INPUT", message)
+        }
+        Err(FindImageByNameError::Io(message)) => {
+            error!(reason = %message, "find image by name io failed");
             error_mapper::internal_io(message)
         }
     }
