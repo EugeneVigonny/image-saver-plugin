@@ -24,13 +24,9 @@
   border-radius: 12px;
   background: rgba(0, 0, 0, 0.5);
   cursor: pointer;
-  display: none;
+  display: flex;
   align-items: center;
   justify-content: center;
-}
-
-.image-saver-plugin__wrap:hover .image-saver-plugin__btn {
-  display: flex;
 }
 
 .image-saver-plugin__wrap.image-saver-plugin__wrap--unsupported .image-saver-plugin__btn {
