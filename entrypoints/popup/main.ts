@@ -9,15 +9,18 @@ import { create_logger } from "@/entrypoints/shared/logger";
 
 const log = create_logger("popup");
 const daemon_save_directory_key = "daemon_save_directory";
+const daemon_save_directory_history_key = "daemon_save_directory_history";
 const daemon_max_long_edge_key = "daemon_max_long_edge";
 const daemon_quality_key = "daemon_quality";
 const default_max_long_edge = 1920;
 const default_quality = 85;
+const max_directory_history_items = 8;
 
 type PopupViewModel = Readonly<{
   is_busy: boolean;
   daemon_online: boolean;
   directory_path: string;
+  directory_history: readonly string[];
   max_long_edge: number;
   quality: number;
   last_error: string | null;
@@ -31,6 +34,7 @@ let view_model: PopupViewModel = {
   is_busy: false,
   daemon_online: false,
   directory_path: "",
+  directory_history: [],
   max_long_edge: default_max_long_edge,
   quality: default_quality,
   last_error: null,
@@ -83,6 +87,50 @@ function normalize_quality(input: number): number {
   return Math.min(100, Math.max(1, Math.round(input)));
 }
 
+function normalize_directory_history(input: unknown): readonly string[] {
+  if (!Array.isArray(input)) {
+    return [];
+  }
+  const result: string[] = [];
+  for (const item of input) {
+    if (typeof item !== "string") {
+      continue;
+    }
+    const trimmed = item.trim();
+    if (trimmed.length === 0) {
+      continue;
+    }
+    if (result.includes(trimmed)) {
+      continue;
+    }
+    result.push(trimmed);
+    if (result.length >= max_directory_history_items) {
+      break;
+    }
+  }
+  return result;
+}
+
+function push_directory_history(
+  history: readonly string[],
+  value: string
+): readonly string[] {
+  const trimmed = value.trim();
+  if (trimmed.length === 0) {
+    return history;
+  }
+  const next = [trimmed, ...history.filter((row) => row !== trimmed)];
+  return next.slice(0, max_directory_history_items);
+}
+
+function escape_html_attr(value: string): string {
+  return value
+    .replaceAll("&", "&amp;")
+    .replaceAll("\"", "&quot;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;");
+}
+
 function apply_busy_state(): void {
   const path_input = document.querySelector<HTMLInputElement>("#daemon-directory-path");
   const max_long_edge_input = document.querySelector<HTMLInputElement>("#daemon-max-long-edge");
@@ -106,6 +154,7 @@ function apply_busy_state(): void {
 async function load_local_settings(): Promise<void> {
   const bag = await browser.storage.local.get([
     daemon_save_directory_key,
+    daemon_save_directory_history_key,
     daemon_max_long_edge_key,
     daemon_quality_key
   ]);
@@ -115,6 +164,7 @@ async function load_local_settings(): Promise<void> {
     ...view_model,
     directory_path:
       typeof bag[daemon_save_directory_key] === "string" ? bag[daemon_save_directory_key] : "",
+    directory_history: normalize_directory_history(bag[daemon_save_directory_history_key]),
     max_long_edge:
       typeof raw_max_long_edge === "number"
         ? normalize_max_long_edge(raw_max_long_edge)
@@ -127,10 +177,20 @@ async function sync_health(): Promise<void> {
   try {
     const health = await daemon_health();
     const daemon_directory_path = await daemon_get_save_directory();
+    const next_directory_history =
+      daemon_directory_path !== null
+        ? push_directory_history(view_model.directory_history, daemon_directory_path)
+        : view_model.directory_history;
+    if (daemon_directory_path !== null) {
+      await browser.storage.local.set({
+        [daemon_save_directory_history_key]: next_directory_history
+      });
+    }
     set_view_model({
       ...view_model,
       daemon_online: true,
       directory_path: daemon_directory_path ?? view_model.directory_path,
+      directory_history: next_directory_history,
       protocol: health.protocol,
       version: health.version,
       last_error: null
@@ -172,6 +232,10 @@ async function on_save_settings_click(): Promise<void> {
 
     await browser.storage.local.set({
       [daemon_save_directory_key]: directory_path,
+      [daemon_save_directory_history_key]: push_directory_history(
+        view_model.directory_history,
+        directory_path
+      ),
       [daemon_max_long_edge_key]: max_long_edge,
       [daemon_quality_key]: quality
     });
@@ -183,6 +247,7 @@ async function on_save_settings_click(): Promise<void> {
     set_view_model({
       ...view_model,
       directory_path,
+      directory_history: push_directory_history(view_model.directory_history, directory_path),
       max_long_edge,
       quality,
       last_error: null
@@ -202,6 +267,7 @@ async function on_save_settings_click(): Promise<void> {
 
 function render(): void {
   const disabled_attr = view_model.is_busy ? "disabled" : "";
+  const escaped_directory_path = escape_html_attr(view_model.directory_path);
   const can_show_ready_overlay =
     view_model.daemon_online && view_model.directory_path.trim().length > 0;
   app.innerHTML = `
@@ -216,7 +282,12 @@ function render(): void {
             <p>Версия: <strong>${view_model.version ?? "—"}</strong>, protocol: <strong>${view_model.protocol ?? "—"}</strong></p>
             <label>
                 <p>Папка сохранения (absolute path)</p>
-                <input id="daemon-directory-path" value="${view_model.directory_path}" ${disabled_attr} />
+                <input id="daemon-directory-path" list="daemon-directory-history" value="${escaped_directory_path}" ${disabled_attr} />
+                <datalist id="daemon-directory-history">
+                  ${view_model.directory_history
+                    .map((row) => `<option value="${escape_html_attr(row)}"></option>`)
+                    .join("")}
+                </datalist>
             </label>
             <label>
                 <p>Max long edge (1..8192)</p>
