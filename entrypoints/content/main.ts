@@ -226,7 +226,18 @@ export function run_content_app(): void {
       document.addEventListener("load", on_image_load, true);
       browser.storage.onChanged.addListener(on_storage_changed);
 
-      const on_page_hide = (): void => {
+      const on_page_show = (): void => {
+        // BFCache restore: content script instance survives, but DOM/observers may need re-sync.
+        void apply_daemon_gate();
+      };
+
+      const on_page_hide = (event: PageTransitionEvent): void => {
+        if (event.persisted) {
+          // Do not teardown on BFCache navigation; page can be restored by Back/Forward.
+          return;
+        }
+
+        window.removeEventListener("pageshow", on_page_show);
         window.removeEventListener("pagehide", on_page_hide);
         document.removeEventListener("visibilitychange", on_visibility_change);
         document.removeEventListener("load", on_image_load, true);
@@ -236,6 +247,7 @@ export function run_content_app(): void {
         teardown_overlays();
         dispose_enabled_indicator();
       };
+      window.addEventListener("pageshow", on_page_show);
       window.addEventListener("pagehide", on_page_hide);
     })
     .catch((error: unknown) => {
