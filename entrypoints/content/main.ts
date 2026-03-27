@@ -7,6 +7,7 @@ import { ImageOverlayController } from "./overlay";
 import { OutcomeCacheRegistry } from "./outcome_cache";
 import { query_image_elements } from "./query_images";
 import { IMAGE_SAVER_ROOT_ATTR } from "./constants";
+import { find_batch_queue } from "./find_batch_queue";
 
 const log = create_logger("content");
 
@@ -217,6 +218,7 @@ export function run_content_app(): void {
     if (area !== "local" || changes[daemon_save_directory_key] === undefined) {
       return;
     }
+    find_batch_queue.clear_cache();
     void apply_daemon_gate();
   };
 

@@ -112,6 +112,16 @@ function create_icon_layer(src: string, alt: string, extra_class?: string): HTML
   return el;
 }
 
+function stem_from_file_name(file_name: string): string | null {
+  const trimmed = file_name.trim();
+  if (trimmed.length === 0) {
+    return null;
+  }
+  const dot = trimmed.lastIndexOf(".");
+  const stem = dot > 0 ? trimmed.slice(0, dot) : trimmed;
+  return stem.length > 0 ? stem : null;
+}
+
 /** Обертка вокруг страничного `img`: кнопка «сохранить», визуальные стадии, вызов `queue_save`. */
 export class ImageOverlayController {
   private readonly img: HTMLImageElement;
@@ -376,6 +386,10 @@ export class ImageOverlayController {
         image_url: resolved.url,
         options
       });
+      const saved_stem = stem_from_file_name(suggested_name);
+      if (saved_stem !== null) {
+        find_batch_queue.set_cached_hit(saved_stem, suggested_name);
+      }
       await this.deps.outcome_cache.set_saved(key);
       this.set_visual("saved");
       return;

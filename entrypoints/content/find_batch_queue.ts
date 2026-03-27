@@ -3,6 +3,8 @@ import { daemon_find_images_batch } from "../shared/daemon_client";
 const BATCH_WINDOW_MS = 75;
 const MAX_BATCH_SIZE = 50;
 const MAX_PARALLEL_BATCHES = 2;
+const CACHE_TTL_HIT_MS = 5 * 60 * 1000;
+const CACHE_TTL_MISS_MS = 60 * 1000;
 
 type Waiter = Readonly<{
   resolve: (value: string[]) => void;
@@ -16,13 +18,24 @@ type StemTask = {
   state: TaskState;
 };
 
+type CacheEntry = Readonly<{
+  matches: string[];
+  expires_at: number;
+}>;
+
 export class FindBatchQueue {
   private readonly pending_order: string[] = [];
   private readonly tasks = new Map<string, StemTask>();
+  private readonly cache = new Map<string, CacheEntry>();
   private flush_timer: ReturnType<typeof setTimeout> | null = null;
   private active_batches = 0;
 
   enqueue(stem: string): Promise<string[]> {
+    const cached = this.read_cache(stem);
+    if (cached !== null) {
+      return Promise.resolve(cached);
+    }
+
     const existing = this.tasks.get(stem);
     if (existing !== undefined) {
       return existing.promise;
@@ -97,6 +110,7 @@ export class FindBatchQueue {
           continue;
         }
         const matches = Array.isArray(response[stem]) ? response[stem] : [];
+        this.write_cache(stem, matches);
         for (const waiter of task.waiters) {
           waiter.resolve(matches);
         }
@@ -114,6 +128,37 @@ export class FindBatchQueue {
         this.tasks.delete(stem);
       }
     }
+  }
+
+  set_cached_hit(stem: string, file_name: string): void {
+    if (stem.trim().length === 0 || file_name.trim().length === 0) {
+      return;
+    }
+    this.write_cache(stem, [file_name]);
+  }
+
+  clear_cache(): void {
+    this.cache.clear();
+  }
+
+  private read_cache(stem: string): string[] | null {
+    const entry = this.cache.get(stem);
+    if (entry === undefined) {
+      return null;
+    }
+    if (Date.now() > entry.expires_at) {
+      this.cache.delete(stem);
+      return null;
+    }
+    return entry.matches;
+  }
+
+  private write_cache(stem: string, matches: string[]): void {
+    const ttl = matches.length > 0 ? CACHE_TTL_HIT_MS : CACHE_TTL_MISS_MS;
+    this.cache.set(stem, {
+      matches,
+      expires_at: Date.now() + ttl
+    });
   }
 }
 
