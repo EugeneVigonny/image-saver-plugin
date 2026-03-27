@@ -1,5 +1,6 @@
 import "./style.css";
 import {
+  daemon_get_save_directory,
   daemon_health,
   daemon_set_save_directory,
   type DaemonError
@@ -125,9 +126,11 @@ async function load_local_settings(): Promise<void> {
 async function sync_health(): Promise<void> {
   try {
     const health = await daemon_health();
+    const daemon_directory_path = await daemon_get_save_directory();
     set_view_model({
       ...view_model,
       daemon_online: true,
+      directory_path: daemon_directory_path ?? view_model.directory_path,
       protocol: health.protocol,
       version: health.version,
       last_error: null

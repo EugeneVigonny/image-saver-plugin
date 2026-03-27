@@ -136,6 +136,21 @@ export async function daemon_set_save_directory(path: string): Promise<string> {
   return response.path;
 }
 
+export async function daemon_get_save_directory(): Promise<string | null> {
+  try {
+    const response = await request_json<{ path: string }>("/v1/save-directory", "GET");
+    return response.path;
+  } catch (error: unknown) {
+    if (typeof error === "object" && error !== null) {
+      const row = error as DaemonError;
+      if (row.code === "E_NOT_CONFIGURED") {
+        return null;
+      }
+    }
+    throw error;
+  }
+}
+
 export async function daemon_image_exists(file_name: string): Promise<boolean> {
   const response = await request_json<{ exists: boolean }>(
     `/v1/images/exists?file_name=${encodeURIComponent(file_name)}`,
