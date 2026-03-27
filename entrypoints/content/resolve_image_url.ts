@@ -3,7 +3,8 @@ export type ResolveImageUrlFailureReason =
   | "empty"
   | "invalid_url"
   | "svg"
-  | "sample";
+  | "sample"
+  | "preview";
 
 export type ResolveImageUrlResult =
   | Readonly<{ ok: true; url: string }>
@@ -21,6 +22,11 @@ function raw_is_data_svg_xml(raw: string): boolean {
 /** Превью/плейсхолдеры: подстрока `sample` в исходном src или в разрешённом href. */
 function url_is_project_sample_placeholder(raw: string, absolute_href: string): boolean {
   return raw.toLowerCase().includes("sample") || absolute_href.toLowerCase().includes("sample");
+}
+
+function url_is_preview_image(raw: string, absolute_href: string): boolean {
+  const value = `${raw}\n${absolute_href}`.toLowerCase();
+  return value.includes("/preview/") || value.includes("/data/preview/");
 }
 
 /**
@@ -98,6 +104,9 @@ export function resolve_image_url_from_element(
 
   if (url_is_project_sample_placeholder(raw, parsed.href)) {
     return { ok: false, reason: "sample" };
+  }
+  if (url_is_preview_image(raw, parsed.href)) {
+    return { ok: false, reason: "preview" };
   }
 
   if (pathname_looks_like_svg_file(parsed.pathname)) {

@@ -118,6 +118,7 @@ export class ImageOverlayController {
   private icon_spinner: HTMLImageElement | null = null;
   private icon_error: HTMLImageElement | null = null;
   private bound_click: (ev: MouseEvent) => void;
+  private bound_image_load: () => void;
   private visual_state: OverlayVisual = "hidden";
 
   constructor(img: HTMLImageElement, deps: OverlayDeps) {
@@ -127,6 +128,9 @@ export class ImageOverlayController {
       ev.preventDefault();
       ev.stopPropagation();
       void this.on_click();
+    };
+    this.bound_image_load = () => {
+      void this.refresh();
     };
     this.mount();
   }
@@ -155,6 +159,7 @@ export class ImageOverlayController {
     btn.addEventListener("click", this.bound_click);
     this.wrap.appendChild(btn);
     this.button = btn;
+    this.img.addEventListener("load", this.bound_image_load);
 
     void this.refresh();
   }
@@ -203,6 +208,7 @@ export class ImageOverlayController {
       this.button.remove();
       this.button = null;
     }
+    this.img.removeEventListener("load", this.bound_image_load);
     this.icon_plus = null;
     this.icon_ok = null;
     this.icon_spinner = null;
