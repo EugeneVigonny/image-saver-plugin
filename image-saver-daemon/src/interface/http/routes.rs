@@ -4,7 +4,7 @@ use crate::interface::http::handlers;
 use axum::{
     Router,
     extract::DefaultBodyLimit,
-    routing::{get, post, put},
+    routing::{get, post},
 };
 use tokio::sync::RwLock;
 
@@ -22,7 +22,7 @@ pub fn build_router(state: AppState) -> Router {
         .route("/v1/images", post(handlers::save_image_handler))
         .route(
             "/v1/save-directory",
-            put(handlers::set_save_directory_handler),
+            get(handlers::get_save_directory_handler).put(handlers::set_save_directory_handler),
         )
         .layer(DefaultBodyLimit::max(MAX_UPLOAD_BYTES))
         .with_state(state)
@@ -201,6 +201,65 @@ mod tests {
 
         let guard = state.save_directory.read().await;
         assert_eq!(guard.clone(), Some(expected));
+    }
+
+    #[tokio::test]
+    async fn get_save_directory_returns_not_configured_when_missing() {
+        let app = build_router(AppState {
+            save_directory: Arc::new(RwLock::new(None)),
+        });
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("GET")
+                    .uri("/v1/save-directory")
+                    .body(Body::empty())
+                    .expect("request builder must be valid"),
+            )
+            .await
+            .expect("router must respond");
+
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        let bytes = to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("body must be readable");
+        let json: serde_json::Value =
+            serde_json::from_slice(&bytes).expect("response must be valid json");
+        assert_eq!(
+            json.get("code").and_then(serde_json::Value::as_str),
+            Some("E_NOT_CONFIGURED")
+        );
+    }
+
+    #[tokio::test]
+    async fn get_save_directory_returns_current_path() {
+        let expected = std::env::temp_dir();
+        let app = build_router(AppState {
+            save_directory: Arc::new(RwLock::new(Some(expected.clone()))),
+        });
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("GET")
+                    .uri("/v1/save-directory")
+                    .body(Body::empty())
+                    .expect("request builder must be valid"),
+            )
+            .await
+            .expect("router must respond");
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let bytes = to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("body must be readable");
+        let json: serde_json::Value =
+            serde_json::from_slice(&bytes).expect("response must be valid json");
+        assert_eq!(
+            json.get("path").and_then(serde_json::Value::as_str),
+            Some(expected.to_string_lossy().as_ref())
+        );
     }
 
     #[tokio::test]
