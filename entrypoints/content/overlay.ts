@@ -4,7 +4,6 @@ import spinner_icon_url from "../../assets/content/spinner-svgrepo-com.svg?url";
 import error_icon_url from "../../assets/content/error-svgrepo-com.svg?url";
 import { suggested_name_from_image_url } from "../shared/naming";
 import {
-  daemon_find_image_by_name,
   daemon_image_exists,
   daemon_save_image_from_url
 } from "../shared/daemon_client";
@@ -12,6 +11,7 @@ import { create_logger } from "../shared/logger";
 import { IMAGE_SAVER_ROOT_ATTR } from "./constants";
 import { make_job_dedup_key } from "../shared/job_dedup_key";
 import { extract_gallery_stem_from_url } from "./extract_gallery_stem";
+import { find_batch_queue } from "./find_batch_queue";
 import { resolve_image_url_from_element } from "./resolve_image_url";
 import type { OutcomeCacheRegistry } from "./outcome_cache";
 import type { SaveImageOptions } from "../shared/daemon_client";
@@ -192,7 +192,7 @@ export class ImageOverlayController {
         this.set_gallery_compact_mode(true);
         this.set_visual("hidden");
         try {
-          const matches = await daemon_find_image_by_name(gallery_stem);
+          const matches = await find_batch_queue.enqueue(gallery_stem);
           if (matches.length > 0) {
             this.set_visual("saved");
             const tooltip = matches.join(", ");

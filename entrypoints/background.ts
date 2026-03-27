@@ -13,6 +13,7 @@ type ProxyRequest =
   | { type: "daemon.set_save_directory"; path: string }
   | { type: "daemon.image_exists"; file_name: string }
   | { type: "daemon.find_image_by_name"; name: string }
+  | { type: "daemon.find_images_batch"; names: string[] }
   | {
       type: "daemon.save_image_from_url";
       file_name: string;
@@ -32,6 +33,7 @@ type ProxySuccess =
   | { ok: true; type: "daemon.set_save_directory"; data: { path: string } }
   | { ok: true; type: "daemon.image_exists"; data: { exists: boolean } }
   | { ok: true; type: "daemon.find_image_by_name"; data: { result: string[] } }
+  | { ok: true; type: "daemon.find_images_batch"; data: { result: Record<string, string[]> } }
   | {
       ok: true;
       type: "daemon.save_image_from_url";
@@ -113,7 +115,7 @@ function to_daemon_error(status: number, body: unknown, fallback: string): Proxy
 
 async function request_json<T>(
   path: string,
-  method: "GET" | "PUT",
+  method: "GET" | "PUT" | "POST",
   body?: unknown,
   signal?: AbortSignal
 ): Promise<T | ProxyFailure> {
@@ -214,6 +216,18 @@ async function handle_proxy_request(request: ProxyRequest): Promise<ProxyRespons
       return result;
     }
     return { ok: true, type: "daemon.find_image_by_name", data: { result: result.result } };
+  }
+
+  if (request.type === "daemon.find_images_batch") {
+    const result = await request_json<{ ok: true; result: Record<string, string[]> }>(
+      "/v1/images/find-batch",
+      "POST",
+      { names: request.names }
+    );
+    if ("ok" in result && result.ok === false) {
+      return result;
+    }
+    return { ok: true, type: "daemon.find_images_batch", data: { result: result.result } };
   }
 
   if (request.type === "daemon.save_image_from_url") {
