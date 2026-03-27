@@ -4,7 +4,8 @@ export type ResolveImageUrlFailureReason =
   | "invalid_url"
   | "svg"
   | "sample"
-  | "preview";
+  | "preview"
+  | "thumbnails";
 
 export type ResolveImageUrlResult =
   | Readonly<{ ok: true; url: string }>
@@ -27,6 +28,15 @@ function url_is_project_sample_placeholder(raw: string, absolute_href: string): 
 function url_is_preview_image(raw: string, absolute_href: string): boolean {
   const value = `${raw}\n${absolute_href}`.toLowerCase();
   return value.includes("/preview/") || value.includes("/data/preview/");
+}
+
+function url_is_thumbnail_image(raw: string, absolute_href: string): boolean {
+  const value = `${raw}\n${absolute_href}`.toLowerCase();
+  return (
+    value.includes("/thumbnail/") ||
+    value.includes("/thumbnails/") ||
+    value.includes("/data/thumbnail/")
+  );
 }
 
 /**
@@ -107,6 +117,9 @@ export function resolve_image_url_from_element(
   }
   if (url_is_preview_image(raw, parsed.href)) {
     return { ok: false, reason: "preview" };
+  }
+  if (url_is_thumbnail_image(raw, parsed.href)) {
+    return { ok: false, reason: "thumbnails" };
   }
 
   if (pathname_looks_like_svg_file(parsed.pathname)) {
