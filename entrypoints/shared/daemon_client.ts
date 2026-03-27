@@ -8,7 +8,7 @@ const daemon_base_url =
 
 export type SaveImageOptions = Readonly<{
   max_long_edge?: number;
-  jpeg_quality?: number;
+  quality?: number;
 }>;
 
 export type DaemonError = Readonly<{

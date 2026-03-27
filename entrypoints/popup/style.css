@@ -32,6 +32,21 @@ body {
   font-size: 13px;
 }
 
+.popup-root label {
+  display: block;
+  margin-top: 8px;
+}
+
+.popup-root input {
+  width: 100%;
+  box-sizing: border-box;
+  border: 1px solid #374151;
+  border-radius: 8px;
+  padding: 8px 10px;
+  background: #111827;
+  color: #e5e7eb;
+}
+
 .popup-actions {
   margin-top: 10px;
 }

@@ -10,8 +10,13 @@ import { IMAGE_SAVER_ROOT_ATTR } from "./constants";
 import { make_job_dedup_key } from "../shared/job_dedup_key";
 import { resolve_image_url_from_element } from "./resolve_image_url";
 import type { OutcomeCacheRegistry } from "./outcome_cache";
+import type { SaveImageOptions } from "../shared/daemon_client";
 
 const log = create_logger("content");
+const daemon_max_long_edge_key = "daemon_max_long_edge";
+const daemon_quality_key = "daemon_quality";
+const default_max_long_edge = 1920;
+const default_quality = 85;
 
 type OverlayVisual = "idle" | "saving" | "saved" | "error" | "hidden";
 
@@ -28,6 +33,28 @@ function error_to_text(error: unknown): string {
     return code.length > 0 ? `${message} (${code})` : message;
   }
   return error instanceof Error ? error.message : String(error);
+}
+
+function normalize_max_long_edge(input: unknown): number {
+  if (typeof input !== "number" || !Number.isFinite(input)) {
+    return default_max_long_edge;
+  }
+  return Math.min(8192, Math.max(1, Math.round(input)));
+}
+
+function normalize_quality(input: unknown): number {
+  if (typeof input !== "number" || !Number.isFinite(input)) {
+    return default_quality;
+  }
+  return Math.min(100, Math.max(1, Math.round(input)));
+}
+
+async function load_save_image_options(): Promise<SaveImageOptions> {
+  const bag = await browser.storage.local.get([daemon_max_long_edge_key, daemon_quality_key]);
+  return {
+    max_long_edge: normalize_max_long_edge(bag[daemon_max_long_edge_key]),
+    quality: normalize_quality(bag[daemon_quality_key])
+  };
 }
 
 function unwrap_target_image(img: HTMLImageElement): void {
@@ -281,9 +308,11 @@ export class ImageOverlayController {
       }
 
       const blob = await download_image(resolved.url);
+      const options = await load_save_image_options();
       await daemon_save_image_multipart({
         file_name: suggested_name,
-        blob
+        blob,
+        options
       });
       await this.deps.outcome_cache.set_saved(key);
       this.set_visual("saved");
