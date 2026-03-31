@@ -34,6 +34,7 @@ type ProxyRequestMap = {
     type: "daemon.save_image_from_url";
     file_name: string;
     image_url: string;
+    source_page_url?: string;
     options?: SaveImageOptions;
   };
   "daemon.save_image": {
@@ -150,6 +151,7 @@ export async function daemon_save_image_multipart(params: {
 export async function daemon_save_image_from_url(params: {
   file_name: string;
   image_url: string;
+  source_page_url?: string;
   options?: SaveImageOptions;
 }): Promise<SaveImageResponse> {
   const request: ProxyRequestMap["daemon.save_image_from_url"] = {
@@ -159,6 +161,9 @@ export async function daemon_save_image_from_url(params: {
   };
   if (params.options !== undefined) {
     request.options = params.options;
+  }
+  if (params.source_page_url !== undefined) {
+    request.source_page_url = params.source_page_url;
   }
   const response = await request_via_background("daemon.save_image_from_url", request);
   log.info("daemon_save_image_from_url done", {

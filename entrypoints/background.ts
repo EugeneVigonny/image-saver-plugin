@@ -18,6 +18,7 @@ type ProxyRequest =
       type: "daemon.save_image_from_url";
       file_name: string;
       image_url: string;
+      source_page_url?: string;
       options?: SaveImageOptions;
     }
   | {
@@ -113,6 +114,24 @@ function to_daemon_error(status: number, body: unknown, fallback: string): Proxy
   return { ok: false, status, message: fallback };
 }
 
+async function read_text_safely(response: Response): Promise<string> {
+  try {
+    return await response.text();
+  } catch {
+    return "";
+  }
+}
+
+function body_looks_like_captcha(html_or_text: string): boolean {
+  const lower = html_or_text.toLowerCase();
+  return (
+    lower.includes("captcha") ||
+    lower.includes("please enter the captcha") ||
+    lower.includes("cloudflare") ||
+    lower.includes("attention required")
+  );
+}
+
 async function request_json<T>(
   path: string,
   method: "GET" | "PUT" | "POST",
@@ -134,7 +153,9 @@ async function request_json<T>(
 
   let response: Response;
   try {
-    response = await fetch(daemon_url(path), init);
+    const target_url = daemon_url(path);
+    log.debug("proxy fetch -> daemon", { method, path, target_url });
+    response = await fetch(target_url, init);
   } catch (error) {
     return to_transport_error(error, path);
   }
@@ -233,16 +254,38 @@ async function handle_proxy_request(request: ProxyRequest): Promise<ProxyRespons
   if (request.type === "daemon.save_image_from_url") {
     let image_response: Response;
     try {
-      image_response = await fetch(request.image_url);
+      const image_request_init: RequestInit = {
+        credentials: "include",
+        referrerPolicy: "strict-origin-when-cross-origin"
+      };
+      if (request.source_page_url !== undefined && request.source_page_url.length > 0) {
+        image_request_init.referrer = request.source_page_url;
+      }
+      log.debug("proxy fetch -> image source", {
+        image_url: request.image_url,
+        source_page_url: request.source_page_url
+      });
+      image_response = await fetch(request.image_url, image_request_init);
     } catch (error) {
       return to_transport_error(error, request.image_url);
     }
     if (!image_response.ok) {
+      const content_type = image_response.headers.get("content-type") ?? "";
+      const body_text = await read_text_safely(image_response.clone());
+      const is_captcha = image_response.status === 403 && body_looks_like_captcha(body_text);
+      log.warn("image source fetch rejected", {
+        status: image_response.status,
+        image_url: request.image_url,
+        content_type,
+        captcha_detected: is_captcha
+      });
       return {
         ok: false,
         status: image_response.status,
-        code: "E_NETWORK",
-        message: `Image download failed: HTTP ${String(image_response.status)}`
+        code: is_captcha ? "E_SOURCE_CAPTCHA" : "E_NETWORK",
+        message: is_captcha
+          ? "Image source requires CAPTCHA. Open image in browser and complete verification."
+          : `Image download failed: HTTP ${String(image_response.status)}`
       };
     }
     let image_blob: Blob;
@@ -264,7 +307,13 @@ async function handle_proxy_request(request: ProxyRequest): Promise<ProxyRespons
 
     let response: Response;
     try {
-      response = await fetch(daemon_url("/v1/images"), { method: "POST", body: form });
+      const target_url = daemon_url("/v1/images");
+      log.debug("proxy fetch -> daemon multipart", {
+        method: "POST",
+        path: "/v1/images",
+        target_url
+      });
+      response = await fetch(target_url, { method: "POST", body: form });
     } catch (error) {
       return to_transport_error(error, "/v1/images");
     }
@@ -312,7 +361,13 @@ async function handle_proxy_request(request: ProxyRequest): Promise<ProxyRespons
 
   let response: Response;
   try {
-    response = await fetch(daemon_url("/v1/images"), { method: "POST", body: form });
+    const target_url = daemon_url("/v1/images");
+    log.debug("proxy fetch -> daemon multipart", {
+      method: "POST",
+      path: "/v1/images",
+      target_url
+    });
+    response = await fetch(target_url, { method: "POST", body: form });
   } catch (error) {
     return to_transport_error(error, "/v1/images");
   }

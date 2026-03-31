@@ -384,6 +384,7 @@ export class ImageOverlayController {
       await daemon_save_image_from_url({
         file_name: suggested_name,
         image_url: resolved.url,
+        source_page_url,
         options
       });
       const saved_stem = stem_from_file_name(suggested_name);
