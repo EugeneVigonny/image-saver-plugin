@@ -1,10 +1,13 @@
 import { daemon_find_images_batch } from "../shared/daemon_client";
+import { create_logger } from "../shared/logger";
 
 const BATCH_WINDOW_MS = 75;
 const MAX_BATCH_SIZE = 50;
 const MAX_PARALLEL_BATCHES = 2;
 const CACHE_TTL_HIT_MS = 5 * 60 * 1000;
 const CACHE_TTL_MISS_MS = 60 * 1000;
+const METRICS_LOG_EVERY_CHUNKS = 5;
+const log = create_logger("content");
 
 type Waiter = Readonly<{
   resolve: (value: string[]) => void;
@@ -29,12 +32,20 @@ export class FindBatchQueue {
   private readonly cache = new Map<string, CacheEntry>();
   private flush_timer: ReturnType<typeof setTimeout> | null = null;
   private active_batches = 0;
+  private metrics_chunks = 0;
+  private metrics_cache_hits = 0;
+  private metrics_cache_misses = 0;
+  private metrics_batch_requests = 0;
+  private metrics_batch_stems_total = 0;
+  private metrics_batch_latency_total_ms = 0;
 
   enqueue(stem: string): Promise<string[]> {
     const cached = this.read_cache(stem);
     if (cached !== null) {
+      this.metrics_cache_hits += 1;
       return Promise.resolve(cached);
     }
+    this.metrics_cache_misses += 1;
 
     const existing = this.tasks.get(stem);
     if (existing !== undefined) {
@@ -102,6 +113,9 @@ export class FindBatchQueue {
   }
 
   private async run_chunk(stems: string[]): Promise<void> {
+    const started_at = Date.now();
+    this.metrics_batch_requests += 1;
+    this.metrics_batch_stems_total += stems.length;
     try {
       const response = await daemon_find_images_batch(stems);
       for (const stem of stems) {
@@ -126,6 +140,30 @@ export class FindBatchQueue {
           waiter.reject(error);
         }
         this.tasks.delete(stem);
+      }
+    } finally {
+      const elapsed = Date.now() - started_at;
+      this.metrics_batch_latency_total_ms += elapsed;
+      this.metrics_chunks += 1;
+      if (this.metrics_chunks % METRICS_LOG_EVERY_CHUNKS === 0) {
+        const avg_batch_size =
+          this.metrics_batch_requests > 0
+            ? this.metrics_batch_stems_total / this.metrics_batch_requests
+            : 0;
+        const avg_latency_ms =
+          this.metrics_batch_requests > 0
+            ? this.metrics_batch_latency_total_ms / this.metrics_batch_requests
+            : 0;
+        log.debug("find_batch_queue metrics", {
+          cache_hits: this.metrics_cache_hits,
+          cache_misses: this.metrics_cache_misses,
+          batch_requests: this.metrics_batch_requests,
+          avg_batch_size: Number(avg_batch_size.toFixed(2)),
+          avg_batch_latency_ms: Number(avg_latency_ms.toFixed(2)),
+          pending_stems: this.pending_order.length,
+          active_batches: this.active_batches,
+          cache_size: this.cache.size
+        });
       }
     }
   }
