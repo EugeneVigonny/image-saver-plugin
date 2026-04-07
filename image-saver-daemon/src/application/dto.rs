@@ -71,6 +71,22 @@ pub struct SaveImageResponse {
     pub skipped: bool,
 }
 
+#[derive(Debug, Clone, Serialize, ToSchema, sqlx::FromRow)]
+pub struct StoredFileRecord {
+    pub id: i64,
+    pub name: String,
+    pub extension: String,
+    pub full_name: String,
+    pub path: String,
+    pub hash: String,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+pub struct ListFilesResponse {
+    pub ok: bool,
+    pub result: Vec<StoredFileRecord>,
+}
+
 #[derive(Debug, Serialize, ToSchema)]
 pub struct ErrorResponse {
     pub ok: bool,

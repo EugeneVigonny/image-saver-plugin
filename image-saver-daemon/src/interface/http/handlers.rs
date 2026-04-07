@@ -10,14 +10,15 @@ use crate::application::{
     commands::set_save_directory::{SetSaveDirectoryError, set_save_directory},
     dto::{
         ErrorResponse, FindBatchRequest, FindBatchResponse, FindImageByNameResponse,
-        GetSaveDirectoryResponse, ImageExistsResponse, SaveImageResponse, SetSaveDirectoryRequest,
-        SetSaveDirectoryResponse, UploadMeta,
+        GetSaveDirectoryResponse, ImageExistsResponse, ListFilesResponse, SaveImageResponse,
+        SetSaveDirectoryRequest, SetSaveDirectoryResponse, UploadMeta,
     },
     queries::find_image_by_name::{FindImageByNameError, find_image_by_name},
     queries::find_images_by_names::{FindImagesByNamesError, find_images_by_names},
     queries::health::{HealthResponse, health_response},
     queries::image_exists::{ImageExistsError, image_exists},
 };
+use crate::infrastructure::sqlite_files;
 use crate::interface::http::types::{
     FindImageByNameQuery, ImageExistsQuery, MultipartParts, SaveImageMultipartRequest,
 };
@@ -126,7 +127,7 @@ pub async fn get_save_directory_handler(
     )
 )]
 pub async fn image_exists_handler(
-    State(state): State<AppState>,
+    State(_state): State<AppState>,
     Query(query): Query<ImageExistsQuery>,
 ) -> (StatusCode, Json<serde_json::Value>) {
     info!(
@@ -135,25 +136,24 @@ pub async fn image_exists_handler(
         "image exists check called"
     );
 
-    let save_dir = {
-        let save_dir_guard = state.save_directory.read().await;
-        save_dir_guard.clone()
+    match image_exists(Some(std::path::Path::new(".")), &query.file_name) {
+        Ok(_) => {}
+        Err(ImageExistsError::InvalidInput(message)) => {
+            return error_mapper::bad_request("E_INVALID_INPUT", message);
+        }
+        Err(error) => {
+            return error_mapper::internal_io(format!("unexpected validation error: {error:?}"));
+        }
+    }
+    let Some(pool) = sqlite_files::pool() else {
+        return error_mapper::internal_io("sqlite pool is not initialized");
     };
-    match image_exists(save_dir.as_deref(), &query.file_name) {
+    match sqlite_files::exists_by_full_name(pool, &query.file_name).await {
         Ok(exists) => {
             let response = ImageExistsResponse { ok: true, exists };
             (StatusCode::OK, Json(serde_json::json!(response)))
         }
-        Err(ImageExistsError::NotConfigured) => {
-            error_mapper::bad_request("E_NOT_CONFIGURED", "save directory is not configured")
-        }
-        Err(ImageExistsError::InvalidInput(message)) => {
-            error_mapper::bad_request("E_INVALID_INPUT", message)
-        }
-        Err(ImageExistsError::Io(message)) => {
-            error!(reason = %message, "image exists io check failed");
-            error_mapper::internal_io(message)
-        }
+        Err(message) => error_mapper::internal_io(message),
     }
 }
 
@@ -168,7 +168,7 @@ pub async fn image_exists_handler(
     )
 )]
 pub async fn find_image_by_name_handler(
-    State(state): State<AppState>,
+    State(_state): State<AppState>,
     Query(query): Query<FindImageByNameQuery>,
 ) -> (StatusCode, Json<serde_json::Value>) {
     info!(
@@ -177,26 +177,24 @@ pub async fn find_image_by_name_handler(
         "find image by name called"
     );
 
-    let save_dir = {
-        let save_dir_guard = state.save_directory.read().await;
-        save_dir_guard.clone()
+    match find_image_by_name(Some(std::path::Path::new(".")), &query.name) {
+        Ok(_) => {}
+        Err(FindImageByNameError::InvalidInput(message)) => {
+            return error_mapper::bad_request("E_INVALID_INPUT", message);
+        }
+        Err(error) => {
+            return error_mapper::internal_io(format!("unexpected validation error: {error:?}"));
+        }
+    }
+    let Some(pool) = sqlite_files::pool() else {
+        return error_mapper::internal_io("sqlite pool is not initialized");
     };
-
-    match find_image_by_name(save_dir.as_deref(), &query.name) {
+    match sqlite_files::find_by_name(pool, &query.name).await {
         Ok(result) => {
             let response = FindImageByNameResponse { ok: true, result };
             (StatusCode::OK, Json(serde_json::json!(response)))
         }
-        Err(FindImageByNameError::NotConfigured) => {
-            error_mapper::bad_request("E_NOT_CONFIGURED", "save directory is not configured")
-        }
-        Err(FindImageByNameError::InvalidInput(message)) => {
-            error_mapper::bad_request("E_INVALID_INPUT", message)
-        }
-        Err(FindImageByNameError::Io(message)) => {
-            error!(reason = %message, "find image by name io failed");
-            error_mapper::internal_io(message)
-        }
+        Err(message) => error_mapper::internal_io(message),
     }
 }
 
@@ -211,7 +209,7 @@ pub async fn find_image_by_name_handler(
     )
 )]
 pub async fn find_images_batch_handler(
-    State(state): State<AppState>,
+    State(_state): State<AppState>,
     Json(payload): Json<FindBatchRequest>,
 ) -> (StatusCode, Json<serde_json::Value>) {
     info!(
@@ -220,26 +218,24 @@ pub async fn find_images_batch_handler(
         "find images batch called"
     );
 
-    let save_dir = {
-        let save_dir_guard = state.save_directory.read().await;
-        save_dir_guard.clone()
+    match find_images_by_names(Some(std::path::Path::new(".")), &payload.names) {
+        Ok(_) => {}
+        Err(FindImagesByNamesError::InvalidInput(message)) => {
+            return error_mapper::bad_request("E_INVALID_INPUT", message);
+        }
+        Err(error) => {
+            return error_mapper::internal_io(format!("unexpected validation error: {error:?}"));
+        }
+    }
+    let Some(pool) = sqlite_files::pool() else {
+        return error_mapper::internal_io("sqlite pool is not initialized");
     };
-
-    match find_images_by_names(save_dir.as_deref(), &payload.names) {
+    match sqlite_files::find_by_names(pool, &payload.names).await {
         Ok(result) => {
             let response = FindBatchResponse { ok: true, result };
             (StatusCode::OK, Json(serde_json::json!(response)))
         }
-        Err(FindImagesByNamesError::NotConfigured) => {
-            error_mapper::bad_request("E_NOT_CONFIGURED", "save directory is not configured")
-        }
-        Err(FindImagesByNamesError::InvalidInput(message)) => {
-            error_mapper::bad_request("E_INVALID_INPUT", message)
-        }
-        Err(FindImagesByNamesError::Io(message)) => {
-            error!(reason = %message, "find images batch io failed");
-            error_mapper::internal_io(message)
-        }
+        Err(message) => error_mapper::internal_io(message),
     }
 }
 
@@ -368,6 +364,36 @@ pub async fn save_image_handler(
         meta.options.as_ref(),
     ) {
         Ok(row) => {
+            if let Some(pool) = sqlite_files::pool() {
+                let full_name = std::path::Path::new(&meta.file_name)
+                    .file_name()
+                    .and_then(|value| value.to_str())
+                    .unwrap_or(&meta.file_name)
+                    .to_string();
+                let name = std::path::Path::new(&full_name)
+                    .file_stem()
+                    .and_then(|value| value.to_str())
+                    .unwrap_or_default()
+                    .to_string();
+                let extension = std::path::Path::new(&full_name)
+                    .extension()
+                    .and_then(|value| value.to_str())
+                    .unwrap_or_default()
+                    .to_string();
+                let hash = format!("{:x}", md5::compute(&file));
+                if let Err(message) = sqlite_files::insert_file(
+                    pool,
+                    &name,
+                    &extension,
+                    &full_name,
+                    &row.written_path,
+                    &hash,
+                )
+                .await
+                {
+                    return error_mapper::internal_io(message);
+                }
+            }
             let response = SaveImageResponse {
                 ok: true,
                 written_path: row.written_path,
@@ -386,5 +412,26 @@ pub async fn save_image_handler(
         }
         Err(SaveImageError::ImageDecodeFailed(message)) => error_mapper::image_decode(message),
         Err(SaveImageError::Io(message)) => error_mapper::internal_io(message),
+    }
+}
+
+#[utoipa::path(
+    get,
+    path = "/v1/images/all",
+    responses(
+        (status = 200, description = "All files metadata from sqlite", body = ListFilesResponse),
+        (status = 500, description = "I/O error", body = ErrorResponse)
+    )
+)]
+pub async fn list_all_images_handler() -> (StatusCode, Json<serde_json::Value>) {
+    let Some(pool) = sqlite_files::pool() else {
+        return error_mapper::internal_io("sqlite pool is not initialized");
+    };
+    match sqlite_files::list_all_files(pool).await {
+        Ok(result) => {
+            let response = ListFilesResponse { ok: true, result };
+            (StatusCode::OK, Json(serde_json::json!(response)))
+        }
+        Err(message) => error_mapper::internal_io(message),
     }
 }

@@ -4,6 +4,7 @@ use std::{fs, path::Path};
 pub enum FindImageByNameError {
     NotConfigured,
     InvalidInput(String),
+    #[allow(dead_code)]
     Io(String),
 }
 

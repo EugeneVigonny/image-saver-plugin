@@ -24,6 +24,7 @@ pub fn build_router(state: AppState) -> Router {
         .route("/v1/health", get(handlers::health_handler))
         .route("/v1/images/exists", get(handlers::image_exists_handler))
         .route("/v1/images/find", get(handlers::find_image_by_name_handler))
+        .route("/v1/images/all", get(handlers::list_all_images_handler))
         .route(
             "/v1/images/find-batch",
             post(handlers::find_images_batch_handler),
@@ -40,17 +41,19 @@ pub fn build_router(state: AppState) -> Router {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
+    use std::sync::{Arc, OnceLock};
 
     use axum::{
         body::{Body, to_bytes},
         http::{Request, StatusCode, header},
     };
     use image::{DynamicImage, GenericImageView, ImageFormat};
+    use sqlx::{SqlitePool, sqlite::SqliteConnectOptions};
     use tokio::sync::RwLock;
     use tower::ServiceExt as _;
 
     use super::{AppState, build_router};
+    use crate::infrastructure::sqlite_files;
 
     fn make_upload_body(file_name: &str, payload: &[u8]) -> (String, String) {
         make_upload_body_with_meta_json(
@@ -89,6 +92,33 @@ mod tests {
         body.extend_from_slice(payload);
         body.extend_from_slice(tail.as_bytes());
         (boundary.to_string(), body)
+    }
+
+    async fn ensure_sqlite_pool_for_tests() -> SqlitePool {
+        static INIT: OnceLock<()> = OnceLock::new();
+        let database_path = std::env::temp_dir().join("image-saver-daemon-tests.db");
+        let connect_options = SqliteConnectOptions::new()
+            .filename(&database_path)
+            .create_if_missing(true);
+        if INIT.get().is_none() {
+            let _ = std::fs::remove_file(&database_path);
+            let pool = SqlitePool::connect_with(connect_options)
+                .await
+                .expect("must connect sqlite");
+            sqlx::query("PRAGMA journal_mode = WAL;")
+                .execute(&pool)
+                .await
+                .expect("must enable WAL");
+            sqlx::migrate!()
+                .run(&pool)
+                .await
+                .expect("must run migrations");
+            let _ = sqlite_files::set_pool(pool);
+            let _ = INIT.set(());
+        }
+        sqlite_files::pool()
+            .expect("sqlite pool must exist")
+            .clone()
     }
 
     #[tokio::test]
@@ -130,6 +160,55 @@ mod tests {
             .and_then(serde_json::Value::as_str)
             .is_some_and(|value| !value.is_empty());
         assert!(version_is_non_empty);
+    }
+
+    #[tokio::test]
+    async fn list_all_images_returns_rows_from_sqlite() {
+        let pool = ensure_sqlite_pool_for_tests().await;
+        sqlx::query(
+            "INSERT OR REPLACE INTO files (name, extension, full_name, path, hash) VALUES (?, ?, ?, ?, ?)",
+        )
+        .bind("sample")
+        .bind("jpg")
+        .bind("sample.jpg")
+        .bind("C:/tmp/sample.jpg")
+        .bind("abc123")
+        .execute(&pool)
+        .await
+        .expect("must insert test row");
+
+        let app = build_router(AppState {
+            save_directory: Arc::new(RwLock::new(None)),
+        });
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("GET")
+                    .uri("/v1/images/all")
+                    .body(Body::empty())
+                    .expect("request builder must be valid"),
+            )
+            .await
+            .expect("router must respond");
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("body must be readable");
+        let json: serde_json::Value =
+            serde_json::from_slice(&body).expect("response must be valid json");
+        let found = json
+            .get("result")
+            .and_then(serde_json::Value::as_array)
+            .is_some_and(|rows| {
+                rows.iter().any(|row| {
+                    row.get("full_name")
+                        .and_then(serde_json::Value::as_str)
+                        .is_some_and(|name| name == "sample.jpg")
+                })
+            });
+        assert!(found);
     }
 
     #[tokio::test]
@@ -274,6 +353,7 @@ mod tests {
 
     #[tokio::test]
     async fn image_exists_returns_not_configured_when_directory_is_missing() {
+        let _pool = ensure_sqlite_pool_for_tests().await;
         let app = build_router(AppState {
             save_directory: Arc::new(RwLock::new(None)),
         });
@@ -289,22 +369,23 @@ mod tests {
             .await
             .expect("router must respond");
 
-        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        assert_eq!(response.status(), StatusCode::OK);
         let bytes = to_bytes(response.into_body(), usize::MAX)
             .await
             .expect("body must be readable");
         let json: serde_json::Value =
             serde_json::from_slice(&bytes).expect("response must be valid json");
         assert_eq!(
-            json.get("code").and_then(serde_json::Value::as_str),
-            Some("E_NOT_CONFIGURED")
+            json.get("exists").and_then(serde_json::Value::as_bool),
+            Some(false)
         );
     }
 
     #[tokio::test]
     async fn image_exists_returns_false_for_missing_file() {
+        let _pool = ensure_sqlite_pool_for_tests().await;
         let state = AppState {
-            save_directory: Arc::new(RwLock::new(Some(std::env::temp_dir()))),
+            save_directory: Arc::new(RwLock::new(None)),
         };
         let app = build_router(state);
 
@@ -363,6 +444,7 @@ mod tests {
 
     #[tokio::test]
     async fn find_image_by_name_returns_not_configured_when_directory_is_missing() {
+        let _pool = ensure_sqlite_pool_for_tests().await;
         let app = build_router(AppState {
             save_directory: Arc::new(RwLock::new(None)),
         });
@@ -378,15 +460,15 @@ mod tests {
             .await
             .expect("router must respond");
 
-        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        assert_eq!(response.status(), StatusCode::OK);
         let bytes = to_bytes(response.into_body(), usize::MAX)
             .await
             .expect("body must be readable");
         let json: serde_json::Value =
             serde_json::from_slice(&bytes).expect("response must be valid json");
         assert_eq!(
-            json.get("code").and_then(serde_json::Value::as_str),
-            Some("E_NOT_CONFIGURED")
+            json.get("result").and_then(serde_json::Value::as_array),
+            Some(&Vec::new())
         );
     }
 
@@ -422,9 +504,9 @@ mod tests {
 
     #[tokio::test]
     async fn find_image_by_name_returns_empty_result_when_no_match() {
-        let dir = std::env::temp_dir();
+        let _pool = ensure_sqlite_pool_for_tests().await;
         let state = AppState {
-            save_directory: Arc::new(RwLock::new(Some(dir))),
+            save_directory: Arc::new(RwLock::new(None)),
         };
         let app = build_router(state);
 
@@ -453,17 +535,43 @@ mod tests {
 
     #[tokio::test]
     async fn find_image_by_name_returns_single_and_multiple_matches() {
-        let dir = std::env::temp_dir().join("image-saver-router-find-matches");
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).expect("must create test dir");
-        std::fs::write(dir.join("04df1032d561b14c714fd530a05908de.jpg"), b"a")
-            .expect("must create jpg file");
-        std::fs::write(dir.join("04df1032d561b14c714fd530a05908de.png"), b"b")
-            .expect("must create png file");
-        std::fs::write(dir.join("single_match.webp"), b"c").expect("must create webp file");
+        let pool = ensure_sqlite_pool_for_tests().await;
+        sqlx::query(
+            "INSERT OR REPLACE INTO files (name, extension, full_name, path, hash) VALUES (?, ?, ?, ?, ?)",
+        )
+        .bind("04df1032d561b14c714fd530a05908de")
+        .bind("jpg")
+        .bind("04df1032d561b14c714fd530a05908de.jpg")
+        .bind("C:/tmp/04df1032d561b14c714fd530a05908de.jpg")
+        .bind("a")
+        .execute(&pool)
+        .await
+        .expect("must insert row");
+        sqlx::query(
+            "INSERT OR REPLACE INTO files (name, extension, full_name, path, hash) VALUES (?, ?, ?, ?, ?)",
+        )
+        .bind("04df1032d561b14c714fd530a05908de")
+        .bind("png")
+        .bind("04df1032d561b14c714fd530a05908de.png")
+        .bind("C:/tmp/04df1032d561b14c714fd530a05908de.png")
+        .bind("b")
+        .execute(&pool)
+        .await
+        .expect("must insert row");
+        sqlx::query(
+            "INSERT OR REPLACE INTO files (name, extension, full_name, path, hash) VALUES (?, ?, ?, ?, ?)",
+        )
+        .bind("single_match")
+        .bind("webp")
+        .bind("single_match.webp")
+        .bind("C:/tmp/single_match.webp")
+        .bind("c")
+        .execute(&pool)
+        .await
+        .expect("must insert row");
 
         let app = build_router(AppState {
-            save_directory: Arc::new(RwLock::new(Some(dir.clone()))),
+            save_directory: Arc::new(RwLock::new(None)),
         });
 
         let single_response = app
@@ -511,12 +619,11 @@ mod tests {
                 "04df1032d561b14c714fd530a05908de.png"
             ]))
         );
-
-        let _ = std::fs::remove_dir_all(dir);
     }
 
     #[tokio::test]
     async fn find_batch_returns_not_configured_when_directory_is_missing() {
+        let _pool = ensure_sqlite_pool_for_tests().await;
         let app = build_router(AppState {
             save_directory: Arc::new(RwLock::new(None)),
         });
@@ -534,16 +641,13 @@ mod tests {
             .await
             .expect("router must respond");
 
-        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        assert_eq!(response.status(), StatusCode::OK);
         let bytes = to_bytes(response.into_body(), usize::MAX)
             .await
             .expect("body must be readable");
         let json: serde_json::Value =
             serde_json::from_slice(&bytes).expect("response must be valid json");
-        assert_eq!(
-            json.get("code").and_then(serde_json::Value::as_str),
-            Some("E_NOT_CONFIGURED")
-        );
+        assert_eq!(json.get("result"), Some(&serde_json::json!({ "abc": [] })));
     }
 
     #[tokio::test]
@@ -579,15 +683,43 @@ mod tests {
 
     #[tokio::test]
     async fn find_batch_returns_mixed_hits_and_misses() {
-        let dir = std::env::temp_dir().join("image-saver-router-find-batch-mixed");
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).expect("must create test dir");
-        std::fs::write(dir.join("hash_a.jpg"), b"a").expect("must create file");
-        std::fs::write(dir.join("hash_a.png"), b"b").expect("must create file");
-        std::fs::write(dir.join("hash_b.webp"), b"c").expect("must create file");
+        let pool = ensure_sqlite_pool_for_tests().await;
+        sqlx::query(
+            "INSERT OR REPLACE INTO files (name, extension, full_name, path, hash) VALUES (?, ?, ?, ?, ?)",
+        )
+        .bind("hash_a")
+        .bind("jpg")
+        .bind("hash_a.jpg")
+        .bind("C:/tmp/hash_a.jpg")
+        .bind("a")
+        .execute(&pool)
+        .await
+        .expect("must insert row");
+        sqlx::query(
+            "INSERT OR REPLACE INTO files (name, extension, full_name, path, hash) VALUES (?, ?, ?, ?, ?)",
+        )
+        .bind("hash_a")
+        .bind("png")
+        .bind("hash_a.png")
+        .bind("C:/tmp/hash_a.png")
+        .bind("b")
+        .execute(&pool)
+        .await
+        .expect("must insert row");
+        sqlx::query(
+            "INSERT OR REPLACE INTO files (name, extension, full_name, path, hash) VALUES (?, ?, ?, ?, ?)",
+        )
+        .bind("hash_b")
+        .bind("webp")
+        .bind("hash_b.webp")
+        .bind("C:/tmp/hash_b.webp")
+        .bind("c")
+        .execute(&pool)
+        .await
+        .expect("must insert row");
 
         let app = build_router(AppState {
-            save_directory: Arc::new(RwLock::new(Some(dir.clone()))),
+            save_directory: Arc::new(RwLock::new(None)),
         });
         let body = serde_json::json!({ "names": ["hash_a", "missing", "hash_b"] }).to_string();
 
@@ -617,8 +749,6 @@ mod tests {
                 "hash_b": ["hash_b.webp"]
             }))
         );
-
-        let _ = std::fs::remove_dir_all(dir);
     }
 
     #[tokio::test]

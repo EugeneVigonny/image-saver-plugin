@@ -10,6 +10,7 @@ const MAX_BATCH_NAMES: usize = 500;
 pub enum FindImagesByNamesError {
     NotConfigured,
     InvalidInput(String),
+    #[allow(dead_code)]
     Io(String),
 }
 
