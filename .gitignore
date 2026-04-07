@@ -54,3 +54,4 @@ image-saver-daemon/.env
 target/
 **/target/
 **/*.rs.bk
+image-saver-daemon/*.db*
