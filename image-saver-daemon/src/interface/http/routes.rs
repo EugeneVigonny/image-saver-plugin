@@ -1,12 +1,14 @@
 use std::{path::PathBuf, sync::Arc};
 
-use crate::interface::http::handlers;
+use crate::interface::http::{handlers, openapi::ApiDoc};
 use axum::{
     Router,
     extract::DefaultBodyLimit,
     routing::{get, post},
 };
 use tokio::sync::RwLock;
+use utoipa::OpenApi;
+use utoipa_swagger_ui::SwaggerUi;
 
 const MAX_UPLOAD_BYTES: usize = 50 * 1024 * 1024;
 
@@ -16,6 +18,8 @@ pub struct AppState {
 }
 
 pub fn build_router(state: AppState) -> Router {
+    let openapi = ApiDoc::openapi();
+
     Router::new()
         .route("/v1/health", get(handlers::health_handler))
         .route("/v1/images/exists", get(handlers::image_exists_handler))
@@ -29,6 +33,7 @@ pub fn build_router(state: AppState) -> Router {
             "/v1/save-directory",
             get(handlers::get_save_directory_handler).put(handlers::set_save_directory_handler),
         )
+        .merge(SwaggerUi::new("/swagger-ui").url("/api-doc/openapi.json", openapi))
         .layer(DefaultBodyLimit::max(MAX_UPLOAD_BYTES))
         .with_state(state)
 }

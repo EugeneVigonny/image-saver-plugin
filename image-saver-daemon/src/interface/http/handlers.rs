@@ -9,22 +9,41 @@ use crate::application::{
     commands::save_image::{SaveImageError, save_image},
     commands::set_save_directory::{SetSaveDirectoryError, set_save_directory},
     dto::{
-        FindBatchRequest, FindBatchResponse, FindImageByNameResponse, GetSaveDirectoryResponse,
-        ImageExistsResponse, SaveImageResponse, SetSaveDirectoryRequest, SetSaveDirectoryResponse,
-        UploadMeta,
+        ErrorResponse, FindBatchRequest, FindBatchResponse, FindImageByNameResponse,
+        GetSaveDirectoryResponse, ImageExistsResponse, SaveImageResponse, SetSaveDirectoryRequest,
+        SetSaveDirectoryResponse, UploadMeta,
     },
     queries::find_image_by_name::{FindImageByNameError, find_image_by_name},
     queries::find_images_by_names::{FindImagesByNamesError, find_images_by_names},
     queries::health::{HealthResponse, health_response},
     queries::image_exists::{ImageExistsError, image_exists},
 };
-use crate::interface::http::types::{FindImageByNameQuery, ImageExistsQuery, MultipartParts};
+use crate::interface::http::types::{
+    FindImageByNameQuery, ImageExistsQuery, MultipartParts, SaveImageMultipartRequest,
+};
 use crate::interface::http::{error_mapper, routes::AppState};
 
+#[utoipa::path(
+    get,
+    path = "/v1/health",
+    responses(
+        (status = 200, description = "Daemon health status", body = HealthResponse)
+    )
+)]
 pub async fn health_handler() -> Json<HealthResponse> {
     Json(health_response())
 }
 
+#[utoipa::path(
+    put,
+    path = "/v1/save-directory",
+    request_body = SetSaveDirectoryRequest,
+    responses(
+        (status = 200, description = "Save directory configured", body = SetSaveDirectoryResponse),
+        (status = 400, description = "Validation error", body = ErrorResponse),
+        (status = 500, description = "I/O error", body = ErrorResponse)
+    )
+)]
 pub async fn set_save_directory_handler(
     State(state): State<AppState>,
     Json(payload): Json<SetSaveDirectoryRequest>,
@@ -63,6 +82,14 @@ pub async fn set_save_directory_handler(
     }
 }
 
+#[utoipa::path(
+    get,
+    path = "/v1/save-directory",
+    responses(
+        (status = 200, description = "Current save directory", body = GetSaveDirectoryResponse),
+        (status = 400, description = "Directory not configured", body = ErrorResponse)
+    )
+)]
 pub async fn get_save_directory_handler(
     State(state): State<AppState>,
 ) -> (StatusCode, Json<serde_json::Value>) {
@@ -88,6 +115,16 @@ pub async fn get_save_directory_handler(
     }
 }
 
+#[utoipa::path(
+    get,
+    path = "/v1/images/exists",
+    params(ImageExistsQuery),
+    responses(
+        (status = 200, description = "Image existence checked", body = ImageExistsResponse),
+        (status = 400, description = "Invalid input or missing config", body = ErrorResponse),
+        (status = 500, description = "I/O error", body = ErrorResponse)
+    )
+)]
 pub async fn image_exists_handler(
     State(state): State<AppState>,
     Query(query): Query<ImageExistsQuery>,
@@ -120,6 +157,16 @@ pub async fn image_exists_handler(
     }
 }
 
+#[utoipa::path(
+    get,
+    path = "/v1/images/find",
+    params(FindImageByNameQuery),
+    responses(
+        (status = 200, description = "Images matched by base name", body = FindImageByNameResponse),
+        (status = 400, description = "Invalid input or missing config", body = ErrorResponse),
+        (status = 500, description = "I/O error", body = ErrorResponse)
+    )
+)]
 pub async fn find_image_by_name_handler(
     State(state): State<AppState>,
     Query(query): Query<FindImageByNameQuery>,
@@ -153,6 +200,16 @@ pub async fn find_image_by_name_handler(
     }
 }
 
+#[utoipa::path(
+    post,
+    path = "/v1/images/find-batch",
+    request_body = FindBatchRequest,
+    responses(
+        (status = 200, description = "Batch search result", body = FindBatchResponse),
+        (status = 400, description = "Invalid input or missing config", body = ErrorResponse),
+        (status = 500, description = "I/O error", body = ErrorResponse)
+    )
+)]
 pub async fn find_images_batch_handler(
     State(state): State<AppState>,
     Json(payload): Json<FindBatchRequest>,
@@ -186,6 +243,21 @@ pub async fn find_images_batch_handler(
     }
 }
 
+#[utoipa::path(
+    post,
+    path = "/v1/images",
+    request_body(
+        content = SaveImageMultipartRequest,
+        content_type = "multipart/form-data"
+    ),
+    responses(
+        (status = 200, description = "Image saved", body = SaveImageResponse),
+        (status = 400, description = "Invalid input or missing config", body = ErrorResponse),
+        (status = 413, description = "Payload too large", body = ErrorResponse),
+        (status = 415, description = "Unsupported media type", body = ErrorResponse),
+        (status = 500, description = "Image decode or I/O error", body = ErrorResponse)
+    )
+)]
 pub async fn save_image_handler(
     State(state): State<AppState>,
     multipart: Result<Multipart, MultipartRejection>,

@@ -33,8 +33,12 @@ async fn main() -> Result<(), std::io::Error> {
     let app = interface::http::routes::build_router(app_state).layer(cors);
     let address = resolve_bind_address()?;
     let listener = TcpListener::bind(address).await?;
+    let swagger_url = format!("http://{address}/swagger-ui/");
+    let openapi_url = format!("http://{address}/api-doc/openapi.json");
 
     info!(%address, "image-saver-daemon started");
+    info!("Swagger API:  {swagger_url}");
+    info!("OpenApi schema:  {openapi_url}");
     axum::serve(listener, app)
         .with_graceful_shutdown(shutdown_signal())
         .await
