@@ -17,13 +17,24 @@ pub fn pool() -> Option<&'static SqlitePool> {
     SQLITE_POOL.get()
 }
 
-pub async fn list_all_files(pool: &SqlitePool) -> Result<Vec<StoredFileRecord>, String> {
+pub async fn get_file_by_id(
+    pool: &SqlitePool,
+    id: i64,
+) -> Result<Option<StoredFileRecord>, String> {
     sqlx::query_as::<_, StoredFileRecord>(
-        "SELECT id, name, extension, full_name, path, hash FROM files ORDER BY id ASC",
+        "SELECT id, name, extension, full_name, path, hash FROM files WHERE id = ?",
     )
-    .fetch_all(pool)
+    .bind(id)
+    .fetch_optional(pool)
     .await
-    .map_err(|error| format!("failed to read files table: {error}"))
+    .map_err(|error| format!("failed to read file by id from sqlite: {error}"))
+}
+
+pub async fn files_count(pool: &SqlitePool) -> Result<i64, String> {
+    sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM files")
+        .fetch_one(pool)
+        .await
+        .map_err(|error| format!("failed to count files in sqlite: {error}"))
 }
 
 pub async fn exists_by_full_name(pool: &SqlitePool, full_name: &str) -> Result<bool, String> {

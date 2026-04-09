@@ -2,8 +2,9 @@ use utoipa::OpenApi;
 
 use crate::application::dto::{
     ErrorResponse, FindBatchRequest, FindBatchResponse, FindImageByNameResponse,
-    GetSaveDirectoryResponse, ImageExistsResponse, ListFilesResponse, SaveImageResponse,
-    SetSaveDirectoryRequest, SetSaveDirectoryResponse, StoredFileRecord, UploadMeta, UploadOptions,
+    GetImageByIdResponse, GetSaveDirectoryResponse, ImageExistsResponse, ImagesTableStatusResponse,
+    SaveImageResponse, SetSaveDirectoryRequest, SetSaveDirectoryResponse, StoredFileRecord,
+    UploadMeta, UploadOptions,
 };
 use crate::application::queries::health::HealthResponse;
 use crate::interface::http::handlers;
@@ -18,7 +19,8 @@ use crate::interface::http::types::SaveImageMultipartRequest;
         handlers::image_exists_handler,
         handlers::find_image_by_name_handler,
         handlers::find_images_batch_handler,
-        handlers::list_all_images_handler,
+        handlers::get_image_by_id_handler,
+        handlers::images_table_status_handler,
         handlers::save_image_handler
     ),
     components(
@@ -35,7 +37,8 @@ use crate::interface::http::types::SaveImageMultipartRequest;
             UploadOptions,
             SaveImageResponse,
             StoredFileRecord,
-            ListFilesResponse,
+            GetImageByIdResponse,
+            ImagesTableStatusResponse,
             ErrorResponse,
             SaveImageMultipartRequest
         )

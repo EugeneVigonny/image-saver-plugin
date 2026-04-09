@@ -10,6 +10,11 @@ pub fn bad_request(
     (StatusCode::BAD_REQUEST, Json(serde_json::json!(response)))
 }
 
+pub fn not_found(code: &str, message: impl Into<String>) -> (StatusCode, Json<serde_json::Value>) {
+    let response = ErrorResponse::new(code, message);
+    (StatusCode::NOT_FOUND, Json(serde_json::json!(response)))
+}
+
 pub fn payload_too_large(message: impl Into<String>) -> (StatusCode, Json<serde_json::Value>) {
     let response = ErrorResponse::new("E_PAYLOAD_TOO_LARGE", message);
     (

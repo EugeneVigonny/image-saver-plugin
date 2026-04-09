@@ -24,12 +24,15 @@ pub fn build_router(state: AppState) -> Router {
         .route("/v1/health", get(handlers::health_handler))
         .route("/v1/images/exists", get(handlers::image_exists_handler))
         .route("/v1/images/find", get(handlers::find_image_by_name_handler))
-        .route("/v1/images/all", get(handlers::list_all_images_handler))
+        .route("/v1/images/{id}", get(handlers::get_image_by_id_handler))
         .route(
             "/v1/images/find-batch",
             post(handlers::find_images_batch_handler),
         )
-        .route("/v1/images", post(handlers::save_image_handler))
+        .route(
+            "/v1/images",
+            get(handlers::images_table_status_handler).post(handlers::save_image_handler),
+        )
         .route(
             "/v1/save-directory",
             get(handlers::get_save_directory_handler).put(handlers::set_save_directory_handler),
@@ -101,14 +104,9 @@ mod tests {
             .filename(&database_path)
             .create_if_missing(true);
         if INIT.get().is_none() {
-            let _ = std::fs::remove_file(&database_path);
             let pool = SqlitePool::connect_with(connect_options)
                 .await
                 .expect("must connect sqlite");
-            sqlx::query("PRAGMA journal_mode = WAL;")
-                .execute(&pool)
-                .await
-                .expect("must enable WAL");
             sqlx::migrate!()
                 .run(&pool)
                 .await
@@ -163,7 +161,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn list_all_images_returns_rows_from_sqlite() {
+    async fn get_image_by_id_returns_row_from_sqlite() {
         let pool = ensure_sqlite_pool_for_tests().await;
         sqlx::query(
             "INSERT OR REPLACE INTO files (name, extension, full_name, path, hash) VALUES (?, ?, ?, ?, ?)",
@@ -176,6 +174,11 @@ mod tests {
         .execute(&pool)
         .await
         .expect("must insert test row");
+        let id = sqlx::query_scalar::<_, i64>("SELECT id FROM files WHERE full_name = ?")
+            .bind("sample.jpg")
+            .fetch_one(&pool)
+            .await
+            .expect("must read id");
 
         let app = build_router(AppState {
             save_directory: Arc::new(RwLock::new(None)),
@@ -185,7 +188,7 @@ mod tests {
             .oneshot(
                 Request::builder()
                     .method("GET")
-                    .uri("/v1/images/all")
+                    .uri(format!("/v1/images/{id}"))
                     .body(Body::empty())
                     .expect("request builder must be valid"),
             )
@@ -198,17 +201,67 @@ mod tests {
             .expect("body must be readable");
         let json: serde_json::Value =
             serde_json::from_slice(&body).expect("response must be valid json");
-        let found = json
-            .get("result")
-            .and_then(serde_json::Value::as_array)
-            .is_some_and(|rows| {
-                rows.iter().any(|row| {
-                    row.get("full_name")
-                        .and_then(serde_json::Value::as_str)
-                        .is_some_and(|name| name == "sample.jpg")
-                })
-            });
-        assert!(found);
+        assert_eq!(
+            json.pointer("/result/full_name")
+                .and_then(serde_json::Value::as_str),
+            Some("sample.jpg")
+        );
+    }
+
+    #[tokio::test]
+    async fn images_table_status_returns_count() {
+        let _pool = ensure_sqlite_pool_for_tests().await;
+        let app = build_router(AppState {
+            save_directory: Arc::new(RwLock::new(None)),
+        });
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("GET")
+                    .uri("/v1/images")
+                    .body(Body::empty())
+                    .expect("request builder must be valid"),
+            )
+            .await
+            .expect("router must respond");
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("body must be readable");
+        let json: serde_json::Value =
+            serde_json::from_slice(&body).expect("response must be valid json");
+        assert_eq!(
+            json.get("ok").and_then(serde_json::Value::as_bool),
+            Some(true)
+        );
+        assert!(
+            json.get("count")
+                .and_then(serde_json::Value::as_i64)
+                .is_some()
+        );
+    }
+
+    #[tokio::test]
+    async fn get_image_by_id_returns_404_when_missing() {
+        let _pool = ensure_sqlite_pool_for_tests().await;
+        let app = build_router(AppState {
+            save_directory: Arc::new(RwLock::new(None)),
+        });
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("GET")
+                    .uri("/v1/images/99999999")
+                    .body(Body::empty())
+                    .expect("request builder must be valid"),
+            )
+            .await
+            .expect("router must respond");
+
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
     }
 
     #[tokio::test]

@@ -82,9 +82,15 @@ pub struct StoredFileRecord {
 }
 
 #[derive(Debug, Serialize, ToSchema)]
-pub struct ListFilesResponse {
+pub struct GetImageByIdResponse {
     pub ok: bool,
-    pub result: Vec<StoredFileRecord>,
+    pub result: StoredFileRecord,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+pub struct ImagesTableStatusResponse {
+    pub ok: bool,
+    pub count: i64,
 }
 
 #[derive(Debug, Serialize, ToSchema)]

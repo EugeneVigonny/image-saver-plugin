@@ -1,6 +1,6 @@
 use axum::{
     Json,
-    extract::{Multipart, Query, State, multipart::MultipartRejection},
+    extract::{Multipart, Path, Query, State, multipart::MultipartRejection},
     http::StatusCode,
 };
 use tracing::{error, info};
@@ -10,8 +10,9 @@ use crate::application::{
     commands::set_save_directory::{SetSaveDirectoryError, set_save_directory},
     dto::{
         ErrorResponse, FindBatchRequest, FindBatchResponse, FindImageByNameResponse,
-        GetSaveDirectoryResponse, ImageExistsResponse, ListFilesResponse, SaveImageResponse,
-        SetSaveDirectoryRequest, SetSaveDirectoryResponse, UploadMeta,
+        GetImageByIdResponse, GetSaveDirectoryResponse, ImageExistsResponse,
+        ImagesTableStatusResponse, SaveImageResponse, SetSaveDirectoryRequest,
+        SetSaveDirectoryResponse, UploadMeta,
     },
     queries::find_image_by_name::{FindImageByNameError, find_image_by_name},
     queries::find_images_by_names::{FindImagesByNamesError, find_images_by_names},
@@ -417,19 +418,45 @@ pub async fn save_image_handler(
 
 #[utoipa::path(
     get,
-    path = "/v1/images/all",
+    path = "/v1/images/{id}",
+    params(
+        ("id" = i64, Path, description = "Image record id")
+    ),
     responses(
-        (status = 200, description = "All files metadata from sqlite", body = ListFilesResponse),
+        (status = 200, description = "Image metadata by id", body = GetImageByIdResponse),
+        (status = 404, description = "Record not found", body = ErrorResponse),
         (status = 500, description = "I/O error", body = ErrorResponse)
     )
 )]
-pub async fn list_all_images_handler() -> (StatusCode, Json<serde_json::Value>) {
+pub async fn get_image_by_id_handler(Path(id): Path<i64>) -> (StatusCode, Json<serde_json::Value>) {
     let Some(pool) = sqlite_files::pool() else {
         return error_mapper::internal_io("sqlite pool is not initialized");
     };
-    match sqlite_files::list_all_files(pool).await {
-        Ok(result) => {
-            let response = ListFilesResponse { ok: true, result };
+    match sqlite_files::get_file_by_id(pool, id).await {
+        Ok(Some(result)) => {
+            let response = GetImageByIdResponse { ok: true, result };
+            (StatusCode::OK, Json(serde_json::json!(response)))
+        }
+        Ok(None) => error_mapper::not_found("E_NOT_FOUND", format!("image id {id} not found")),
+        Err(message) => error_mapper::internal_io(message),
+    }
+}
+
+#[utoipa::path(
+    get,
+    path = "/v1/images",
+    responses(
+        (status = 200, description = "Images table status", body = ImagesTableStatusResponse),
+        (status = 500, description = "I/O error", body = ErrorResponse)
+    )
+)]
+pub async fn images_table_status_handler() -> (StatusCode, Json<serde_json::Value>) {
+    let Some(pool) = sqlite_files::pool() else {
+        return error_mapper::internal_io("sqlite pool is not initialized");
+    };
+    match sqlite_files::files_count(pool).await {
+        Ok(count) => {
+            let response = ImagesTableStatusResponse { ok: true, count };
             (StatusCode::OK, Json(serde_json::json!(response)))
         }
         Err(message) => error_mapper::internal_io(message),
