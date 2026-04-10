@@ -1,5 +1,6 @@
 import { create_logger } from "./shared/logger";
 import { DefaultImageSourceBlobAdapter } from "./background/default_image_source_blob_adapter";
+import type { ImageSourceBlobPort } from "./background/image_source_blob_port";
 
 const log = create_logger("background");
 
@@ -15,6 +16,8 @@ type ProxyRequest =
   | { type: "daemon.image_exists"; file_name: string }
   | { type: "daemon.find_image_by_name"; name: string }
   | { type: "daemon.find_images_batch"; names: string[] }
+  | { type: "daemon.get_image_source_adapters" }
+  | { type: "daemon.set_image_source_adapter"; adapter: ImageSourceAdapterKind }
   | {
       type: "daemon.save_image_from_url";
       file_name: string;
@@ -38,6 +41,12 @@ type ProxySuccess =
   | { ok: true; type: "daemon.find_images_batch"; data: { result: Record<string, string[]> } }
   | {
       ok: true;
+      type: "daemon.get_image_source_adapters";
+      data: { selected: ImageSourceAdapterKind; available: ImageSourceAdapterKind[] };
+    }
+  | { ok: true; type: "daemon.set_image_source_adapter"; data: { selected: ImageSourceAdapterKind } }
+  | {
+      ok: true;
       type: "daemon.save_image_from_url";
       data: { written_path: string; skipped: boolean };
     }
@@ -56,7 +65,82 @@ const default_daemon_base_url = "http://127.0.0.1:8765";
 const daemon_base_url =
   (import.meta.env["WXT_DAEMON_BASE_URL"] as string | undefined)?.trim() || default_daemon_base_url;
 const daemon_health_timeout_ms = 2500;
-const image_source_blob_adapter = new DefaultImageSourceBlobAdapter();
+const daemon_image_source_adapter_key = "daemon_image_source_adapter";
+
+type ImageSourceAdapterKind = "default" | "extra";
+type AdapterEntry = Readonly<{
+  name: ImageSourceAdapterKind;
+  create: () => ImageSourceBlobPort;
+}>;
+
+const adapter_entries = new Map<ImageSourceAdapterKind, AdapterEntry>([
+  [
+    "default",
+    {
+      name: "default",
+      create: () => new DefaultImageSourceBlobAdapter()
+    }
+  ]
+]);
+
+let selected_image_source_adapter: ImageSourceAdapterKind = "default";
+let image_source_blob_adapter: ImageSourceBlobPort = new DefaultImageSourceBlobAdapter();
+
+function get_available_image_source_adapters(): ImageSourceAdapterKind[] {
+  return [...adapter_entries.keys()];
+}
+
+function normalize_adapter_kind(value: unknown): ImageSourceAdapterKind {
+  if (value === "extra" && adapter_entries.has("extra")) {
+    return "extra";
+  }
+  return "default";
+}
+
+function activate_selected_adapter(adapter: ImageSourceAdapterKind): void {
+  const entry = adapter_entries.get(adapter) ?? adapter_entries.get("default");
+  if (entry === undefined) {
+    image_source_blob_adapter = new DefaultImageSourceBlobAdapter();
+    selected_image_source_adapter = "default";
+    return;
+  }
+  image_source_blob_adapter = entry.create();
+  selected_image_source_adapter = entry.name;
+  log.info("image source adapter activated", { adapter: selected_image_source_adapter });
+}
+
+async function persist_selected_adapter(adapter: ImageSourceAdapterKind): Promise<void> {
+  await browser.storage.local.set({ [daemon_image_source_adapter_key]: adapter });
+}
+
+async function load_selected_adapter_from_storage(): Promise<void> {
+  const bag = await browser.storage.local.get([daemon_image_source_adapter_key]);
+  const normalized = normalize_adapter_kind(bag[daemon_image_source_adapter_key]);
+  activate_selected_adapter(normalized);
+}
+
+async function try_register_extra_blob_adapter(): Promise<void> {
+  const extra_modules = import.meta.glob("./background/extra_image_source_blob_adapter.ts");
+  const loader = extra_modules["./background/extra_image_source_blob_adapter.ts"];
+  if (loader === undefined) {
+    log.info("extra image source adapter is absent; use default adapter");
+    return;
+  }
+  try {
+    const row = (await loader()) as {
+      ExtraImageSourceBlobAdapter?: new () => ImageSourceBlobPort;
+    };
+    const ExtraCtor = row.ExtraImageSourceBlobAdapter;
+    if (typeof ExtraCtor === "function") {
+      adapter_entries.set("extra", { name: "extra", create: () => new ExtraCtor() });
+      log.info("extra image source adapter registered");
+      return;
+    }
+    log.warn("extra adapter module loaded without constructor");
+  } catch (error: unknown) {
+    log.warn("extra image source adapter load failed; use default adapter", { error });
+  }
+}
 
 function trim_trailing_slash(value: string): string {
   return value.endsWith("/") ? value.slice(0, -1) : value;
@@ -235,6 +319,32 @@ async function handle_proxy_request(request: ProxyRequest): Promise<ProxyRespons
     return { ok: true, type: "daemon.find_images_batch", data: { result: result.result } };
   }
 
+  if (request.type === "daemon.get_image_source_adapters") {
+    return {
+      ok: true,
+      type: "daemon.get_image_source_adapters",
+      data: {
+        selected: selected_image_source_adapter,
+        available: get_available_image_source_adapters()
+      }
+    };
+  }
+
+  if (request.type === "daemon.set_image_source_adapter") {
+    const normalized = normalize_adapter_kind(request.adapter);
+    activate_selected_adapter(normalized);
+    try {
+      await persist_selected_adapter(normalized);
+    } catch (error: unknown) {
+      log.warn("persist_selected_adapter failed", { error, adapter: normalized });
+    }
+    return {
+      ok: true,
+      type: "daemon.set_image_source_adapter",
+      data: { selected: selected_image_source_adapter }
+    };
+  }
+
   if (request.type === "daemon.save_image_from_url") {
     const download_input =
       request.source_page_url === undefined
@@ -341,6 +451,13 @@ async function handle_proxy_request(request: ProxyRequest): Promise<ProxyRespons
 
 export default defineBackground(() => {
   log.info("background initialized");
+  void (async () => {
+    await try_register_extra_blob_adapter();
+    await load_selected_adapter_from_storage();
+  })().catch((error: unknown) => {
+    log.warn("image source adapter init failed", { error });
+    activate_selected_adapter("default");
+  });
   const maybe_chrome_runtime = (
     globalThis as unknown as {
       chrome?: {

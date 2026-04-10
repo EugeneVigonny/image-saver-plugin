@@ -2,8 +2,11 @@ import "./style.css";
 import {
   daemon_get_save_directory,
   daemon_health,
+  daemon_get_image_source_adapters,
+  daemon_set_image_source_adapter,
   daemon_set_save_directory,
-  type DaemonError
+  type DaemonError,
+  type ImageSourceAdapterKind
 } from "@/entrypoints/shared/daemon_client";
 import { create_logger } from "@/entrypoints/shared/logger";
 
@@ -23,6 +26,8 @@ type PopupViewModel = Readonly<{
   directory_history: readonly string[];
   max_long_edge: number;
   quality: number;
+  image_source_adapter: ImageSourceAdapterKind;
+  available_image_source_adapters: readonly ImageSourceAdapterKind[];
   last_error: string | null;
   protocol: number | null;
   version: string | null;
@@ -37,6 +42,8 @@ let view_model: PopupViewModel = {
   directory_history: [],
   max_long_edge: default_max_long_edge,
   quality: default_quality,
+  image_source_adapter: "default",
+  available_image_source_adapters: ["default"],
   last_error: null,
   protocol: null,
   version: null
@@ -135,6 +142,8 @@ function apply_busy_state(): void {
   const path_input = document.querySelector<HTMLInputElement>("#daemon-directory-path");
   const max_long_edge_input = document.querySelector<HTMLInputElement>("#daemon-max-long-edge");
   const quality_input = document.querySelector<HTMLInputElement>("#daemon-quality");
+  const adapter_select =
+    document.querySelector<HTMLSelectElement>("#daemon-image-source-adapter");
   const save_button = document.querySelector<HTMLButtonElement>("#save-settings");
 
   if (path_input !== null) {
@@ -145,6 +154,9 @@ function apply_busy_state(): void {
   }
   if (quality_input !== null) {
     quality_input.disabled = view_model.is_busy;
+  }
+  if (adapter_select !== null) {
+    adapter_select.disabled = view_model.is_busy;
   }
   if (save_button !== null) {
     save_button.disabled = view_model.is_busy;
@@ -171,6 +183,19 @@ async function load_local_settings(): Promise<void> {
         : default_max_long_edge,
     quality: typeof raw_quality === "number" ? normalize_quality(raw_quality) : default_quality
   });
+}
+
+async function sync_image_source_adapters(): Promise<void> {
+  try {
+    const config = await daemon_get_image_source_adapters();
+    set_view_model({
+      ...view_model,
+      image_source_adapter: config.selected,
+      available_image_source_adapters: config.available
+    });
+  } catch (error: unknown) {
+    log.warn("sync_image_source_adapters failed", { error });
+  }
 }
 
 async function sync_health(): Promise<void> {
@@ -216,11 +241,14 @@ async function on_save_settings_click(): Promise<void> {
     const max_long_edge_input =
       document.querySelector<HTMLInputElement>("#daemon-max-long-edge");
     const quality_input = document.querySelector<HTMLInputElement>("#daemon-quality");
+    const adapter_select =
+      document.querySelector<HTMLSelectElement>("#daemon-image-source-adapter");
     const directory_path = path_input?.value.trim() ?? "";
     const max_long_edge = normalize_max_long_edge(
       Number(max_long_edge_input?.value ?? default_max_long_edge)
     );
     const quality = normalize_quality(Number(quality_input?.value ?? default_quality));
+    const adapter_candidate = adapter_select?.value === "extra" ? "extra" : "default";
 
     if (directory_path.length > 0 && !is_absolute_path(directory_path)) {
       set_view_model({
@@ -243,6 +271,7 @@ async function on_save_settings_click(): Promise<void> {
     if (directory_path.length > 0) {
       await daemon_set_save_directory(directory_path);
     }
+    const selected_adapter = await daemon_set_image_source_adapter(adapter_candidate);
 
     set_view_model({
       ...view_model,
@@ -250,6 +279,7 @@ async function on_save_settings_click(): Promise<void> {
       directory_history: push_directory_history(view_model.directory_history, directory_path),
       max_long_edge,
       quality,
+      image_source_adapter: selected_adapter,
       last_error: null
     });
     await sync_health();
@@ -297,6 +327,17 @@ function render(): void {
                 <p>Quality (1..100)</p>
                 <input id="daemon-quality" type="number" min="1" max="100" step="1" value="${view_model.quality}" ${disabled_attr} />
             </label>
+            <label>
+                <p>Image source adapter</p>
+                <select id="daemon-image-source-adapter" ${disabled_attr}>
+                  ${view_model.available_image_source_adapters
+                    .map(
+                      (adapter) =>
+                        `<option value="${adapter}" ${view_model.image_source_adapter === adapter ? "selected" : ""}>${adapter}</option>`
+                    )
+                    .join("")}
+                </select>
+            </label>
             <div class="popup-actions">
                 <button id="save-settings" ${disabled_attr}>Сохранить настройки</button>
             </div>
@@ -316,6 +357,7 @@ render();
 
 void (async () => {
   await load_local_settings();
+  await sync_image_source_adapters();
   await sync_health();
 })().catch((error: unknown) => {
   log.warn("popup init failed", { error });

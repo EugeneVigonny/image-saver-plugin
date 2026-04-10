@@ -23,6 +23,12 @@ export type SaveImageResponse = Readonly<{
   skipped: boolean;
 }>;
 
+export type ImageSourceAdapterKind = "default" | "extra";
+export type ImageSourceAdapterConfig = Readonly<{
+  selected: ImageSourceAdapterKind;
+  available: readonly ImageSourceAdapterKind[];
+}>;
+
 type ProxyRequestMap = {
   "daemon.health": { type: "daemon.health" };
   "daemon.get_save_directory": { type: "daemon.get_save_directory" };
@@ -30,6 +36,11 @@ type ProxyRequestMap = {
   "daemon.image_exists": { type: "daemon.image_exists"; file_name: string };
   "daemon.find_image_by_name": { type: "daemon.find_image_by_name"; name: string };
   "daemon.find_images_batch": { type: "daemon.find_images_batch"; names: string[] };
+  "daemon.get_image_source_adapters": { type: "daemon.get_image_source_adapters" };
+  "daemon.set_image_source_adapter": {
+    type: "daemon.set_image_source_adapter";
+    adapter: ImageSourceAdapterKind;
+  };
   "daemon.save_image_from_url": {
     type: "daemon.save_image_from_url";
     file_name: string;
@@ -52,6 +63,8 @@ type ProxySuccessMap = {
   "daemon.image_exists": { exists: boolean };
   "daemon.find_image_by_name": { result: string[] };
   "daemon.find_images_batch": { result: Record<string, string[]> };
+  "daemon.get_image_source_adapters": ImageSourceAdapterConfig;
+  "daemon.set_image_source_adapter": { selected: ImageSourceAdapterKind };
   "daemon.save_image_from_url": { written_path: string; skipped: boolean };
   "daemon.save_image": { written_path: string; skipped: boolean };
 };
@@ -121,6 +134,22 @@ export async function daemon_find_images_batch(
     names
   });
   return response.result;
+}
+
+export async function daemon_get_image_source_adapters(): Promise<ImageSourceAdapterConfig> {
+  return await request_via_background("daemon.get_image_source_adapters", {
+    type: "daemon.get_image_source_adapters"
+  });
+}
+
+export async function daemon_set_image_source_adapter(
+  adapter: ImageSourceAdapterKind
+): Promise<ImageSourceAdapterKind> {
+  const response = await request_via_background("daemon.set_image_source_adapter", {
+    type: "daemon.set_image_source_adapter",
+    adapter
+  });
+  return response.selected;
 }
 
 export async function daemon_save_image_multipart(params: {
