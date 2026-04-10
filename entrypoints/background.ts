@@ -1,4 +1,5 @@
 import { create_logger } from "./shared/logger";
+import { DefaultImageSourceBlobAdapter } from "./background/default_image_source_blob_adapter";
 
 const log = create_logger("background");
 
@@ -55,6 +56,7 @@ const default_daemon_base_url = "http://127.0.0.1:8765";
 const daemon_base_url =
   (import.meta.env["WXT_DAEMON_BASE_URL"] as string | undefined)?.trim() || default_daemon_base_url;
 const daemon_health_timeout_ms = 2500;
+const image_source_blob_adapter = new DefaultImageSourceBlobAdapter();
 
 function trim_trailing_slash(value: string): string {
   return value.endsWith("/") ? value.slice(0, -1) : value;
@@ -112,24 +114,6 @@ function to_daemon_error(status: number, body: unknown, fallback: string): Proxy
       : { ok: false, status, code, message: message_candidate };
   }
   return { ok: false, status, message: fallback };
-}
-
-async function read_text_safely(response: Response): Promise<string> {
-  try {
-    return await response.text();
-  } catch {
-    return "";
-  }
-}
-
-function body_looks_like_captcha(html_or_text: string): boolean {
-  const lower = html_or_text.toLowerCase();
-  return (
-    lower.includes("captcha") ||
-    lower.includes("please enter the captcha") ||
-    lower.includes("cloudflare") ||
-    lower.includes("attention required")
-  );
 }
 
 async function request_json<T>(
@@ -252,47 +236,13 @@ async function handle_proxy_request(request: ProxyRequest): Promise<ProxyRespons
   }
 
   if (request.type === "daemon.save_image_from_url") {
-    let image_response: Response;
-    try {
-      const image_request_init: RequestInit = {
-        credentials: "include",
-        referrerPolicy: "strict-origin-when-cross-origin"
-      };
-      if (request.source_page_url !== undefined && request.source_page_url.length > 0) {
-        image_request_init.referrer = request.source_page_url;
-      }
-      log.debug("proxy fetch -> image source", {
-        image_url: request.image_url,
-        source_page_url: request.source_page_url
-      });
-      image_response = await fetch(request.image_url, image_request_init);
-    } catch (error) {
-      return to_transport_error(error, request.image_url);
-    }
-    if (!image_response.ok) {
-      const content_type = image_response.headers.get("content-type") ?? "";
-      const body_text = await read_text_safely(image_response.clone());
-      const is_captcha = image_response.status === 403 && body_looks_like_captcha(body_text);
-      log.warn("image source fetch rejected", {
-        status: image_response.status,
-        image_url: request.image_url,
-        content_type,
-        captcha_detected: is_captcha
-      });
-      return {
-        ok: false,
-        status: image_response.status,
-        code: is_captcha ? "E_SOURCE_CAPTCHA" : "E_NETWORK",
-        message: is_captcha
-          ? "Image source requires CAPTCHA. Open image in browser and complete verification."
-          : `Image download failed: HTTP ${String(image_response.status)}`
-      };
-    }
-    let image_blob: Blob;
-    try {
-      image_blob = await image_response.blob();
-    } catch (error) {
-      return to_transport_error(error, request.image_url);
+    const download_input =
+      request.source_page_url === undefined
+        ? { image_url: request.image_url }
+        : { image_url: request.image_url, source_page_url: request.source_page_url };
+    const blob_result = await image_source_blob_adapter.download(download_input);
+    if (!blob_result.ok) {
+      return blob_result;
     }
 
     const form = new FormData();
@@ -303,7 +253,7 @@ async function handle_proxy_request(request: ProxyRequest): Promise<ProxyRespons
         options: request.options
       })
     );
-    form.append("file", image_blob, request.file_name);
+    form.append("file", blob_result.blob, request.file_name);
 
     let response: Response;
     try {

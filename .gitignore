@@ -56,3 +56,4 @@ target/
 **/*.rs.bk
 image-saver-daemon/*.db*
 *.NLJSON
+entrypoints/background/extra_image_source_blob_adapter.ts
