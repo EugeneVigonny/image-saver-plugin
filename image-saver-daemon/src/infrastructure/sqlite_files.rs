@@ -22,7 +22,7 @@ pub async fn get_file_by_id(
     id: i64,
 ) -> Result<Option<StoredFileRecord>, String> {
     sqlx::query_as::<_, StoredFileRecord>(
-        "SELECT id, name, extension, full_name, path, hash FROM files WHERE id = ?",
+        "SELECT id, name, extension, full_name, path, hash, created_at, updated_at FROM files WHERE id = ?",
     )
     .bind(id)
     .fetch_optional(pool)
@@ -44,7 +44,7 @@ pub async fn list_files_page_desc(
 ) -> Result<Vec<StoredFileRecord>, String> {
     let offset = page.saturating_sub(1).saturating_mul(page_size);
     sqlx::query_as::<_, StoredFileRecord>(
-        "SELECT id, name, extension, full_name, path, hash FROM files ORDER BY id DESC LIMIT ? OFFSET ?",
+        "SELECT id, name, extension, full_name, path, hash, created_at, updated_at FROM files ORDER BY id DESC LIMIT ? OFFSET ?",
     )
     .bind(page_size as i64)
     .bind(offset as i64)
@@ -132,7 +132,14 @@ pub async fn insert_file(
     hash: &str,
 ) -> Result<(), String> {
     sqlx::query(
-        "INSERT OR REPLACE INTO files (name, extension, full_name, path, hash) VALUES (?, ?, ?, ?, ?)",
+        "INSERT INTO files (name, extension, full_name, path, hash, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, datetime('now'), datetime('now'))
+         ON CONFLICT(full_name) DO UPDATE SET
+           name = excluded.name,
+           extension = excluded.extension,
+           path = excluded.path,
+           hash = excluded.hash,
+           updated_at = datetime('now')",
     )
     .bind(name)
     .bind(extension)

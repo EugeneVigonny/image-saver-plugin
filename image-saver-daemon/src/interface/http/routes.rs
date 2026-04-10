@@ -59,7 +59,7 @@ mod tests {
     };
     use image::{DynamicImage, GenericImageView, ImageFormat};
     use sqlx::{SqlitePool, sqlite::SqliteConnectOptions};
-    use tokio::sync::RwLock;
+    use tokio::sync::{Mutex, RwLock};
     use tower::ServiceExt as _;
 
     use super::{AppState, build_router};
@@ -105,12 +105,15 @@ mod tests {
     }
 
     async fn ensure_sqlite_pool_for_tests() -> SqlitePool {
-        static INIT: OnceLock<()> = OnceLock::new();
+        static INIT_GUARD: OnceLock<Mutex<bool>> = OnceLock::new();
         let database_path = std::env::temp_dir().join("image-saver-daemon-tests.db");
         let connect_options = SqliteConnectOptions::new()
             .filename(&database_path)
             .create_if_missing(true);
-        if INIT.get().is_none() {
+        let init_guard = INIT_GUARD.get_or_init(|| Mutex::new(false));
+        let mut initialized = init_guard.lock().await;
+        if !*initialized {
+            let _ = std::fs::remove_file(&database_path);
             let pool = SqlitePool::connect_with(connect_options)
                 .await
                 .expect("must connect sqlite");
@@ -119,8 +122,9 @@ mod tests {
                 .await
                 .expect("must run migrations");
             let _ = sqlite_files::set_pool(pool);
-            let _ = INIT.set(());
+            *initialized = true;
         }
+        drop(initialized);
         sqlite_files::pool()
             .expect("sqlite pool must exist")
             .clone()

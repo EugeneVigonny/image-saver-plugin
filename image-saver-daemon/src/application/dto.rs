@@ -79,6 +79,8 @@ pub struct StoredFileRecord {
     pub full_name: String,
     pub path: String,
     pub hash: String,
+    pub created_at: String,
+    pub updated_at: String,
 }
 
 #[derive(Debug, Serialize, ToSchema)]
