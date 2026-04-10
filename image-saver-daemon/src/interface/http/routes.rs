@@ -32,10 +32,8 @@ pub fn build_router(state: AppState) -> Router {
             "/v1/images/find-batch",
             post(handlers::find_images_batch_handler),
         )
-        .route(
-            "/v1/images",
-            get(handlers::images_table_status_handler).post(handlers::save_image_handler),
-        )
+        .route("/v1/images/info", get(handlers::images_table_status_handler))
+        .route("/v1/images", post(handlers::save_image_handler))
         .route(
             "/v1/save-directory",
             get(handlers::get_save_directory_handler).put(handlers::set_save_directory_handler),
@@ -222,7 +220,7 @@ mod tests {
             .oneshot(
                 Request::builder()
                     .method("GET")
-                    .uri("/v1/images")
+                    .uri("/v1/images/info")
                     .body(Body::empty())
                     .expect("request builder must be valid"),
             )

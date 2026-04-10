@@ -475,7 +475,7 @@ pub async fn delete_image_by_id_handler(
 
 #[utoipa::path(
     get,
-    path = "/v1/images",
+    path = "/v1/images/info",
     responses(
         (status = 200, description = "Images table status", body = ImagesTableStatusResponse),
         (status = 500, description = "I/O error", body = ErrorResponse)
