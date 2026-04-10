@@ -32,8 +32,14 @@ pub fn build_router(state: AppState) -> Router {
             "/v1/images/find-batch",
             post(handlers::find_images_batch_handler),
         )
-        .route("/v1/images/info", get(handlers::images_table_status_handler))
-        .route("/v1/images", post(handlers::save_image_handler))
+        .route(
+            "/v1/images/info",
+            get(handlers::images_table_status_handler),
+        )
+        .route(
+            "/v1/images",
+            get(handlers::images_page_handler).post(handlers::save_image_handler),
+        )
         .route(
             "/v1/save-directory",
             get(handlers::get_save_directory_handler).put(handlers::set_save_directory_handler),
@@ -242,6 +248,54 @@ mod tests {
                 .and_then(serde_json::Value::as_i64)
                 .is_some()
         );
+    }
+
+    #[tokio::test]
+    async fn images_page_returns_latest_ten_by_default() {
+        let pool = ensure_sqlite_pool_for_tests().await;
+        for i in 1..=12 {
+            let full_name = format!("page_default_{i}.jpg");
+            let path = format!("C:/tmp/{full_name}");
+            let hash = format!("hash_{i}");
+            sqlx::query(
+                "INSERT OR REPLACE INTO files (name, extension, full_name, path, hash) VALUES (?, ?, ?, ?, ?)",
+            )
+            .bind(format!("page_default_{i}"))
+            .bind("jpg")
+            .bind(full_name)
+            .bind(path)
+            .bind(hash)
+            .execute(&pool)
+            .await
+            .expect("must insert row");
+        }
+
+        let app = build_router(AppState {
+            save_directory: Arc::new(RwLock::new(None)),
+        });
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("GET")
+                    .uri("/v1/images")
+                    .body(Body::empty())
+                    .expect("request builder must be valid"),
+            )
+            .await
+            .expect("router must respond");
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("body must be readable");
+        let json: serde_json::Value =
+            serde_json::from_slice(&body).expect("response must be valid json");
+        let items = json
+            .get("result")
+            .and_then(serde_json::Value::as_array)
+            .expect("result must be array");
+        assert_eq!(items.len(), 10);
     }
 
     #[tokio::test]

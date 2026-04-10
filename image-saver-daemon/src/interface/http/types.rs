@@ -15,6 +15,13 @@ pub(crate) struct FindImageByNameQuery {
     pub(crate) name: String,
 }
 
+#[derive(Debug, serde::Deserialize, IntoParams)]
+#[into_params(parameter_in = Query)]
+pub(crate) struct ImagesPageQuery {
+    #[param(example = 1, minimum = 1)]
+    pub(crate) page: Option<u64>,
+}
+
 #[derive(Debug, Default)]
 pub(crate) struct MultipartParts {
     pub(crate) meta: Option<UploadMeta>,

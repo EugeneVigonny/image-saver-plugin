@@ -37,6 +37,22 @@ pub async fn files_count(pool: &SqlitePool) -> Result<i64, String> {
         .map_err(|error| format!("failed to count files in sqlite: {error}"))
 }
 
+pub async fn list_files_page_desc(
+    pool: &SqlitePool,
+    page: u64,
+    page_size: u64,
+) -> Result<Vec<StoredFileRecord>, String> {
+    let offset = page.saturating_sub(1).saturating_mul(page_size);
+    sqlx::query_as::<_, StoredFileRecord>(
+        "SELECT id, name, extension, full_name, path, hash FROM files ORDER BY id DESC LIMIT ? OFFSET ?",
+    )
+    .bind(page_size as i64)
+    .bind(offset as i64)
+    .fetch_all(pool)
+    .await
+    .map_err(|error| format!("failed to read paged files from sqlite: {error}"))
+}
+
 pub async fn delete_file_by_id(pool: &SqlitePool, id: i64) -> Result<bool, String> {
     let result = sqlx::query("DELETE FROM files WHERE id = ?")
         .bind(id)

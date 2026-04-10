@@ -11,8 +11,8 @@ use crate::application::{
     dto::{
         DeleteImageByIdResponse, ErrorResponse, FindBatchRequest, FindBatchResponse,
         FindImageByNameResponse, GetImageByIdResponse, GetSaveDirectoryResponse,
-        ImageExistsResponse, ImagesTableStatusResponse, SaveImageResponse, SetSaveDirectoryRequest,
-        SetSaveDirectoryResponse, UploadMeta,
+        ImageExistsResponse, ImagesPageResponse, ImagesTableStatusResponse, SaveImageResponse,
+        SetSaveDirectoryRequest, SetSaveDirectoryResponse, UploadMeta,
     },
     queries::find_image_by_name::{FindImageByNameError, find_image_by_name},
     queries::find_images_by_names::{FindImagesByNamesError, find_images_by_names},
@@ -21,9 +21,12 @@ use crate::application::{
 };
 use crate::infrastructure::sqlite_files;
 use crate::interface::http::types::{
-    FindImageByNameQuery, ImageExistsQuery, MultipartParts, SaveImageMultipartRequest,
+    FindImageByNameQuery, ImageExistsQuery, ImagesPageQuery, MultipartParts,
+    SaveImageMultipartRequest,
 };
 use crate::interface::http::{error_mapper, routes::AppState};
+
+const IMAGES_PAGE_SIZE: u64 = 10;
 
 #[utoipa::path(
     get,
@@ -234,6 +237,42 @@ pub async fn find_images_batch_handler(
     match sqlite_files::find_by_names(pool, &payload.names).await {
         Ok(result) => {
             let response = FindBatchResponse { ok: true, result };
+            (StatusCode::OK, Json(serde_json::json!(response)))
+        }
+        Err(message) => error_mapper::internal_io(message),
+    }
+}
+
+#[utoipa::path(
+    get,
+    path = "/v1/images",
+    params(ImagesPageQuery),
+    responses(
+        (status = 200, description = "Paged images list ordered from latest to oldest", body = ImagesPageResponse),
+        (status = 400, description = "Invalid pagination params", body = ErrorResponse),
+        (status = 500, description = "I/O error", body = ErrorResponse)
+    )
+)]
+pub async fn images_page_handler(
+    Query(query): Query<ImagesPageQuery>,
+) -> (StatusCode, Json<serde_json::Value>) {
+    let page = query.page.unwrap_or(1);
+    if page == 0 {
+        return error_mapper::bad_request("E_INVALID_INPUT", "page must be >= 1");
+    }
+
+    let Some(pool) = sqlite_files::pool() else {
+        return error_mapper::internal_io("sqlite pool is not initialized");
+    };
+
+    match sqlite_files::list_files_page_desc(pool, page, IMAGES_PAGE_SIZE).await {
+        Ok(result) => {
+            let response = ImagesPageResponse {
+                ok: true,
+                page,
+                page_size: IMAGES_PAGE_SIZE,
+                result,
+            };
             (StatusCode::OK, Json(serde_json::json!(response)))
         }
         Err(message) => error_mapper::internal_io(message),

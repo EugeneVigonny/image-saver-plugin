@@ -100,6 +100,14 @@ pub struct DeleteImageByIdResponse {
 }
 
 #[derive(Debug, Serialize, ToSchema)]
+pub struct ImagesPageResponse {
+    pub ok: bool,
+    pub page: u64,
+    pub page_size: u64,
+    pub result: Vec<StoredFileRecord>,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
 pub struct ErrorResponse {
     pub ok: bool,
     pub code: String,
