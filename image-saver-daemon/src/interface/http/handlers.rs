@@ -9,9 +9,9 @@ use crate::application::{
     commands::save_image::{SaveImageError, save_image},
     commands::set_save_directory::{SetSaveDirectoryError, set_save_directory},
     dto::{
-        ErrorResponse, FindBatchRequest, FindBatchResponse, FindImageByNameResponse,
-        GetImageByIdResponse, GetSaveDirectoryResponse, ImageExistsResponse,
-        ImagesTableStatusResponse, SaveImageResponse, SetSaveDirectoryRequest,
+        DeleteImageByIdResponse, ErrorResponse, FindBatchRequest, FindBatchResponse,
+        FindImageByNameResponse, GetImageByIdResponse, GetSaveDirectoryResponse,
+        ImageExistsResponse, ImagesTableStatusResponse, SaveImageResponse, SetSaveDirectoryRequest,
         SetSaveDirectoryResponse, UploadMeta,
     },
     queries::find_image_by_name::{FindImageByNameError, find_image_by_name},
@@ -438,6 +438,37 @@ pub async fn get_image_by_id_handler(Path(id): Path<i64>) -> (StatusCode, Json<s
             (StatusCode::OK, Json(serde_json::json!(response)))
         }
         Ok(None) => error_mapper::not_found("E_NOT_FOUND", format!("image id {id} not found")),
+        Err(message) => error_mapper::internal_io(message),
+    }
+}
+
+#[utoipa::path(
+    delete,
+    path = "/v1/images/{id}",
+    params(
+        ("id" = i64, Path, description = "Image record id")
+    ),
+    responses(
+        (status = 200, description = "Image metadata row deleted", body = DeleteImageByIdResponse),
+        (status = 404, description = "Record not found", body = ErrorResponse),
+        (status = 500, description = "I/O error", body = ErrorResponse)
+    )
+)]
+pub async fn delete_image_by_id_handler(
+    Path(id): Path<i64>,
+) -> (StatusCode, Json<serde_json::Value>) {
+    let Some(pool) = sqlite_files::pool() else {
+        return error_mapper::internal_io("sqlite pool is not initialized");
+    };
+    match sqlite_files::delete_file_by_id(pool, id).await {
+        Ok(true) => {
+            let response = DeleteImageByIdResponse {
+                ok: true,
+                deleted_id: id,
+            };
+            (StatusCode::OK, Json(serde_json::json!(response)))
+        }
+        Ok(false) => error_mapper::not_found("E_NOT_FOUND", format!("image id {id} not found")),
         Err(message) => error_mapper::internal_io(message),
     }
 }

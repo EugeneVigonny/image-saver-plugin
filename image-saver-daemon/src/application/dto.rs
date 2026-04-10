@@ -94,6 +94,12 @@ pub struct ImagesTableStatusResponse {
 }
 
 #[derive(Debug, Serialize, ToSchema)]
+pub struct DeleteImageByIdResponse {
+    pub ok: bool,
+    pub deleted_id: i64,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
 pub struct ErrorResponse {
     pub ok: bool,
     pub code: String,

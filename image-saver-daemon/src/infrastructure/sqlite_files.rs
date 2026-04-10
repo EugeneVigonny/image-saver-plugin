@@ -37,6 +37,15 @@ pub async fn files_count(pool: &SqlitePool) -> Result<i64, String> {
         .map_err(|error| format!("failed to count files in sqlite: {error}"))
 }
 
+pub async fn delete_file_by_id(pool: &SqlitePool, id: i64) -> Result<bool, String> {
+    let result = sqlx::query("DELETE FROM files WHERE id = ?")
+        .bind(id)
+        .execute(pool)
+        .await
+        .map_err(|error| format!("failed to delete file by id from sqlite: {error}"))?;
+    Ok(result.rows_affected() > 0)
+}
+
 pub async fn exists_by_full_name(pool: &SqlitePool, full_name: &str) -> Result<bool, String> {
     let row = sqlx::query("SELECT EXISTS(SELECT 1 FROM files WHERE full_name = ?) AS value")
         .bind(full_name)

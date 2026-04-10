@@ -24,7 +24,10 @@ pub fn build_router(state: AppState) -> Router {
         .route("/v1/health", get(handlers::health_handler))
         .route("/v1/images/exists", get(handlers::image_exists_handler))
         .route("/v1/images/find", get(handlers::find_image_by_name_handler))
-        .route("/v1/images/{id}", get(handlers::get_image_by_id_handler))
+        .route(
+            "/v1/images/{id}",
+            get(handlers::get_image_by_id_handler).delete(handlers::delete_image_by_id_handler),
+        )
         .route(
             "/v1/images/find-batch",
             post(handlers::find_images_batch_handler),
@@ -255,6 +258,72 @@ mod tests {
                 Request::builder()
                     .method("GET")
                     .uri("/v1/images/99999999")
+                    .body(Body::empty())
+                    .expect("request builder must be valid"),
+            )
+            .await
+            .expect("router must respond");
+
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn delete_image_by_id_deletes_row_and_returns_200() {
+        let pool = ensure_sqlite_pool_for_tests().await;
+        sqlx::query(
+            "INSERT OR REPLACE INTO files (name, extension, full_name, path, hash) VALUES (?, ?, ?, ?, ?)",
+        )
+        .bind("to_delete")
+        .bind("jpg")
+        .bind("to_delete.jpg")
+        .bind("C:/tmp/to_delete.jpg")
+        .bind("deadbeef")
+        .execute(&pool)
+        .await
+        .expect("must insert test row");
+        let id = sqlx::query_scalar::<_, i64>("SELECT id FROM files WHERE full_name = ?")
+            .bind("to_delete.jpg")
+            .fetch_one(&pool)
+            .await
+            .expect("must read id");
+
+        let app = build_router(AppState {
+            save_directory: Arc::new(RwLock::new(None)),
+        });
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("DELETE")
+                    .uri(format!("/v1/images/{id}"))
+                    .body(Body::empty())
+                    .expect("request builder must be valid"),
+            )
+            .await
+            .expect("router must respond");
+
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let exists = sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM files WHERE id = ?")
+            .bind(id)
+            .fetch_one(&pool)
+            .await
+            .expect("must query row count");
+        assert_eq!(exists, 0);
+    }
+
+    #[tokio::test]
+    async fn delete_image_by_id_returns_404_when_missing() {
+        let _pool = ensure_sqlite_pool_for_tests().await;
+        let app = build_router(AppState {
+            save_directory: Arc::new(RwLock::new(None)),
+        });
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("DELETE")
+                    .uri("/v1/images/99999998")
                     .body(Body::empty())
                     .expect("request builder must be valid"),
             )
